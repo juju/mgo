@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/domodwyer/mgo/bson"
 	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2/bson"
 )
 
 func testValid(c *C, in []byte, expected []byte, result interface{}) {

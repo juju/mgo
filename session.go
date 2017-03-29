@@ -41,7 +41,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/domodwyer/mgo/bson"
 )
 
 type Mode int
@@ -544,7 +544,7 @@ type urlInfoOption struct {
 
 func extractURL(s string) (*urlInfo, error) {
 	s = strings.TrimPrefix(s, "mongodb://")
-	info := &urlInfo{options: make(map[string]string)}
+	info := &urlInfo{options: []urlInfoOption{}}
 
 	if c := strings.Index(s, "?"); c != -1 {
 		for _, pair := range strings.FieldsFunc(s[c+1:], isOptSep) {

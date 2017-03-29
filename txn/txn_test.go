@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	mgo "github.com/domodwyer/mgo"
+	"github.com/domodwyer/mgo/bson"
+	"github.com/domodwyer/mgo/dbtest"
+	"github.com/domodwyer/mgo/txn"
 	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2/dbtest"
-	"gopkg.in/mgo.v2/txn"
 )
 
 func TestAll(t *testing.T) {

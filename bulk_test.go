@@ -27,8 +27,8 @@
 package mgo_test
 
 import (
+	mgo "github.com/domodwyer/mgo"
 	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2"
 )
 
 func (s *S) TestBulkInsert(c *C) {
