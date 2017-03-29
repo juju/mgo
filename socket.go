@@ -207,6 +207,9 @@ func (socket *mongoSocket) Server() *mongoServer {
 // ServerInfo returns details for the server at the time the socket
 // was initially acquired.
 func (socket *mongoSocket) ServerInfo() *mongoServerInfo {
+	if socket == nil {
+		return &mongoServerInfo{}
+	}
 	socket.Lock()
 	serverInfo := socket.serverInfo
 	socket.Unlock()
