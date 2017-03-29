@@ -5,4 +5,4 @@ The MongoDB driver for Go
 
 This fork has had serveral PR's merged from the original mgo repo that are currently awaiting review.
 
-Futher PR's are welcome, but please maintain backwards compatibility.
+Futher PR's (with tests) are welcome, but please maintain backwards compatibility.
