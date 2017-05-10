@@ -19,6 +19,9 @@ env:
         - GO=1.6   MONGODB=x86_64-3.2.3-nojournal
         - GO=1.7   MONGODB=x86_64-3.2.3-nojournal
         - GO=1.8.x MONGODB=x86_64-3.2.3-nojournal
+        - GO=1.6   MONGODB=x86_64-3.2.12
+        - GO=1.7   MONGODB=x86_64-3.2.12
+        - GO=1.8.x MONGODB=x86_64-3.2.12
 
 install:
     - eval "$(gimme $GO)"
