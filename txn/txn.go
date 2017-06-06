@@ -459,13 +459,7 @@ func (r *Runner) load(id bson.ObjectId) (*transaction, error) {
 	return &t, nil
 }
 
-func (r *Runner) loadMulti(toLoad map[bson.ObjectId]struct{}, preloaded map[bson.ObjectId]*transaction) error {
-	ids := make([]bson.ObjectId, len(toLoad))
-	i := 0
-	for id, _ := range toLoad {
-		ids[i] = id
-		i++
-	}
+func (r *Runner) loadMulti(ids []bson.ObjectId, preloaded map[bson.ObjectId]*transaction) error {
 	txns := make([]transaction, 0, len(ids))
 
 	query := r.tc.Find(bson.M{"_id": bson.M{"$in": ids}})

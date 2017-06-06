@@ -155,42 +155,53 @@ func (f *flusher) run() (err error) {
 	return nil
 }
 
+const preloadBatchSize = 100
+
 func (f *flusher) recurse(t *transaction, seen map[bson.ObjectId]*transaction, preloaded map[bson.ObjectId]*transaction) error {
 	seen[t.Id] = t
+	delete(preloaded, t.Id)
 	err := f.advance(t, nil, false)
 	if err != errPreReqs {
 		return err
 	}
 	for _, dkey := range t.docKeys() {
-		toPreload := make(map[bson.ObjectId]struct{})
+		remaining := make([]bson.ObjectId, 0, len(f.queue[dkey]))
+		toPreload := make(map[bson.ObjectId]struct{}, len(f.queue[dkey]))
 		for _, dtt := range f.queue[dkey] {
 			id := dtt.id()
 			if _, scheduled := toPreload[id]; seen[id] != nil || scheduled || preloaded[id] != nil {
 				continue
 			}
 			toPreload[id] = struct{}{}
+			remaining = append(remaining, id)
 		}
-		if len(toPreload) > 0 {
-			err := f.loadMulti(toPreload, preloaded)
+		// done with this map
+		toPreload = nil
+		for len(remaining) > 0 {
+			batch := remaining
+			if len(batch) > preloadBatchSize {
+				batch = remaining[:preloadBatchSize]
+			}
+			remaining = remaining[len(batch):]
+			err := f.loadMulti(batch, preloaded)
 			if err != nil {
 				return err
 			}
-		}
-		for _, dtt := range f.queue[dkey] {
-			id := dtt.id()
-			if seen[id] != nil {
-				continue
-			}
-			qt, ok := preloaded[id]
-			if !ok {
-				qt, err = f.load(id)
+			for _, id := range batch {
+				if seen[id] != nil {
+					continue
+				}
+				qt, ok := preloaded[id]
+				if !ok {
+					qt, err = f.load(id)
+					if err != nil {
+						return err
+					}
+				}
+				err = f.recurse(qt, seen, preloaded)
 				if err != nil {
 					return err
 				}
-			}
-			err = f.recurse(qt, seen, preloaded)
-			if err != nil {
-				return err
 			}
 		}
 	}
