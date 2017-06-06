@@ -136,10 +136,8 @@ func newNonce() string {
 
 type token string
 
-func (tt token) id() bson.ObjectId {
-	return bson.ObjectIdHex(string(tt[:24]))
-}
-func (tt token) nonce() string { return string(tt[25:]) }
+func (tt token) id() bson.ObjectId { return bson.ObjectIdHex(string(tt[:24])) }
+func (tt token) nonce() string     { return string(tt[25:]) }
 
 // Op represents an operation to a single document that may be
 // applied as part of a transaction with other operations.
@@ -332,8 +330,6 @@ func (r *Runner) ResumeAll() (err error) {
 			panic(fmt.Errorf("invalid state for %s after flush: %q", &t, t.State))
 		}
 	}
-	// TODO(jam): 2017-06-04 This is not calling iter.Close() and dealing with
-	// any error it might encounter (db connection closed, etc.)
 	return nil
 }
 
@@ -481,6 +477,7 @@ func (r *Runner) loadMulti(ids []bson.ObjectId, preloaded map[bson.ObjectId]*tra
 	}
 	return nil
 }
+
 
 type typeNature int
 
