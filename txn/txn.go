@@ -459,6 +459,32 @@ func (r *Runner) load(id bson.ObjectId) (*transaction, error) {
 	return &t, nil
 }
 
+func (r *Runner) loadMulti(toLoad map[bson.ObjectId]struct{}, preloaded map[bson.ObjectId]*transaction) error {
+	ids := make([]bson.ObjectId, len(toLoad))
+	i := 0
+	for id, _ := range toLoad {
+		ids[i] = id
+		i++
+	}
+	txns := make([]transaction, 0, len(ids))
+
+	query := r.tc.Find(bson.M{"_id": bson.M{"$in": ids}})
+	// Not sure that this actually has much of an effect when using All()
+	query.Batch(len(ids))
+	err := query.All(&txns)
+	if err == mgo.ErrNotFound {
+		return fmt.Errorf("could not find a transaction in batch: %v", ids)
+	} else if err != nil {
+		return err
+	}
+	for i := range txns {
+		t := &txns[i]
+		preloaded[t.Id] = t
+	}
+	return nil
+}
+
+
 type typeNature int
 
 const (

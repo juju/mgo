@@ -62,7 +62,8 @@ func (f *flusher) run() (err error) {
 
 	f.debugf("Processing %s", f.goal)
 	seen := make(map[bson.ObjectId]*transaction)
-	if err := f.recurse(f.goal, seen); err != nil {
+	preloaded := make(map[bson.ObjectId]*transaction)
+	if err := f.recurse(f.goal, seen, preloaded); err != nil {
 		return err
 	}
 	if f.goal.done() {
@@ -154,23 +155,40 @@ func (f *flusher) run() (err error) {
 	return nil
 }
 
-func (f *flusher) recurse(t *transaction, seen map[bson.ObjectId]*transaction) error {
+func (f *flusher) recurse(t *transaction, seen map[bson.ObjectId]*transaction, preloaded map[bson.ObjectId]*transaction) error {
 	seen[t.Id] = t
 	err := f.advance(t, nil, false)
 	if err != errPreReqs {
 		return err
 	}
 	for _, dkey := range t.docKeys() {
+		toPreload := make(map[bson.ObjectId]struct{})
+		for _, dtt := range f.queue[dkey] {
+			id := dtt.id()
+			if _, scheduled := toPreload[id]; seen[id] != nil || scheduled || preloaded[id] != nil {
+				continue
+			}
+			toPreload[id] = struct{}{}
+		}
+		if len(toPreload) > 0 {
+			err := f.loadMulti(toPreload, preloaded)
+			if err != nil {
+				return err
+			}
+		}
 		for _, dtt := range f.queue[dkey] {
 			id := dtt.id()
 			if seen[id] != nil {
 				continue
 			}
-			qt, err := f.load(id)
-			if err != nil {
-				return err
+			qt, ok := preloaded[id]
+			if !ok {
+				qt, err = f.load(id)
+				if err != nil {
+					return err
+				}
 			}
-			err = f.recurse(qt, seen)
+			err = f.recurse(qt, seen, preloaded)
 			if err != nil {
 				return err
 			}
