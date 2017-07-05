@@ -15,15 +15,19 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Support majority read concerns ([details](https://github.com/globalsign/mgo/pull/2))
 * Improved connection handling ([details](https://github.com/globalsign/mgo/pull/5))
 * Hides SASL warnings ([details](https://github.com/globalsign/mgo/pull/7))
+* Fixes timezone handling ([details](https://github.com/go-mgo/mgo/pull/464)) 
 * Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11), [more](https://github.com/globalsign/mgo/pull/16))
+* Fixes cursor timeouts ([detials](https://jira.mongodb.org/browse/SERVER-24899))
 
 ---
 
 ### Thanks to
+* @BenLubar
 * @carter2000
 * @cezarsa
 * @eaglerayp
 * @drichelson
 * @jameinel
+* @Reenjii
 * @smoya
 * @wgallagher
