@@ -16,6 +16,8 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Improved connection handling ([details](https://github.com/globalsign/mgo/pull/5))
 * Hides SASL warnings ([details](https://github.com/globalsign/mgo/pull/7))
 * Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11))
+* Integration tests run against newest MongoDB 3.2 releases ([details](https://github.com/globalsign/mgo/pull/4))
+* Support for partial indexes ([detials](https://github.com/domodwyer/mgo/commit/5efe8eccb028238d93c222828cae4806aeae9f51))
 
 ---
 
