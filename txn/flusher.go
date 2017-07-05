@@ -271,6 +271,16 @@ NextDoc:
 		change.Upsert = false
 		chaos("")
 		if _, err := cquery.Apply(change, &info); err == nil {
+			if f.opts.MaxTxnQueueLength > 0 && len(info.Queue) > f.opts.MaxTxnQueueLength {
+				// abort with TXN Queue too long, but remove the entry we just added
+				innerErr := c.UpdateId(dkey.Id,
+					bson.D{{"$pullAll", bson.D{{"txn-queue", []token{tt}}}}})
+				if innerErr != nil {
+					f.debugf("error while backing out of queue-too-long: %v", innerErr)
+				}
+				return nil, fmt.Errorf("txn-queue for %v in %q has too many transactions (%d)",
+					dkey.Id, dkey.C, len(info.Queue))
+			}
 			if info.Remove == "" {
 				// Fast path, unless workload is insert/remove heavy.
 				revno[dkey] = info.Revno
