@@ -16,6 +16,7 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Improved connection handling ([details](https://github.com/globalsign/mgo/pull/5))
 * Hides SASL warnings ([details](https://github.com/globalsign/mgo/pull/7))
 * Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11))
+* Fixes timezone handling ([details](https://github.com/go-mgo/mgo/pull/464)) 
 
 ---
 
@@ -25,5 +26,6 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * @eaglerayp
 * @drichelson
 * @jameinel
+* @Reenjii
 * @smoya
 * @wgallagher
