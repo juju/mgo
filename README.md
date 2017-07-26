@@ -18,6 +18,7 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Fixes timezone handling ([details](https://github.com/go-mgo/mgo/pull/464)) 
 * Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11), [more](https://github.com/globalsign/mgo/pull/16))
 * Fixes cursor timeouts ([detials](https://jira.mongodb.org/browse/SERVER-24899))
+* Support index hints and timeouts for count queries ([details](https://github.com/globalsign/mgo/pull/17))
 
 ---
 
@@ -25,8 +26,9 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * @BenLubar
 * @carter2000
 * @cezarsa
-* @eaglerayp
 * @drichelson
+* @eaglerayp
+* @fmpwizard
 * @jameinel
 * @Reenjii
 * @smoya
