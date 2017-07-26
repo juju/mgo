@@ -3281,20 +3281,23 @@ func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32) bool {
 	}
 
 	find := findCmd{
-		Collection:  op.collection[nameDot+1:],
-		Filter:      op.query,
-		Projection:  op.selector,
-		Sort:        op.options.OrderBy,
-		Skip:        op.skip,
-		Limit:       limit,
-		MaxTimeMS:   op.options.MaxTimeMS,
-		MaxScan:     op.options.MaxScan,
-		Hint:        op.options.Hint,
-		Comment:     op.options.Comment,
-		Snapshot:    op.options.Snapshot,
-		OplogReplay: op.flags&flagLogReplay != 0,
-		Collation:   op.options.Collation,
-		ReadConcern: readLevel{level: op.readConcern},
+		Collection:      op.collection[nameDot+1:],
+		Filter:          op.query,
+		Projection:      op.selector,
+		Sort:            op.options.OrderBy,
+		Skip:            op.skip,
+		Limit:           limit,
+		MaxTimeMS:       op.options.MaxTimeMS,
+		MaxScan:         op.options.MaxScan,
+		Hint:            op.options.Hint,
+		Comment:         op.options.Comment,
+		Snapshot:        op.options.Snapshot,
+		Collation:       op.options.Collation,
+		Tailable:        op.flags&flagTailable != 0,
+		AwaitData:       op.flags&flagAwaitData != 0,
+		OplogReplay:     op.flags&flagLogReplay != 0,
+		NoCursorTimeout: op.flags&flagNoCursorTimeout != 0,
+		ReadConcern:     readLevel{level: op.readConcern},
 	}
 
 	if op.limit < 0 {
@@ -4083,10 +4086,12 @@ func (iter *Iter) getMoreCmd() *queryOp {
 }
 
 type countCmd struct {
-	Count string
-	Query interface{}
-	Limit int32 ",omitempty"
-	Skip  int32 ",omitempty"
+	Count     string
+	Query     interface{}
+	Limit     int32  ",omitempty"
+	Skip      int32  ",omitempty"
+	Hint      bson.D `bson:"hint,omitempty"`
+	MaxTimeMS int    `bson:"maxTimeMS,omitempty"`
 }
 
 // Count returns the total number of documents in the result set.
@@ -4108,8 +4113,12 @@ func (q *Query) Count() (n int, err error) {
 	if query == nil {
 		query = bson.D{}
 	}
+	// not checking the error because if type assertion fails, we
+	// simply want a Zero bson.D
+	hint, _ := q.op.options.Hint.(bson.D)
 	result := struct{ N int }{}
-	err = session.DB(dbname).Run(countCmd{cname, query, limit, op.skip}, &result)
+	err = session.DB(dbname).Run(countCmd{cname, query, limit, op.skip, hint, op.options.MaxTimeMS}, &result)
+
 	return result.N, err
 }
 

@@ -13,7 +13,7 @@ func flush(r *Runner, t *transaction) error {
 		Runner:   r,
 		goal:     t,
 		goalKeys: make(map[docKey]bool),
-		queue:    make(map[docKey][]token),
+		queue:    make(map[docKey][]tokenAndId),
 		debugId:  debugPrefix(),
 	}
 	for _, dkey := range f.goal.docKeys() {
@@ -26,8 +26,34 @@ type flusher struct {
 	*Runner
 	goal     *transaction
 	goalKeys map[docKey]bool
-	queue    map[docKey][]token
+	queue    map[docKey][]tokenAndId
 	debugId  string
+}
+
+type tokenAndId struct {
+	tt  token
+	bid bson.ObjectId
+}
+
+func (ti tokenAndId) id() bson.ObjectId {
+	return ti.bid
+}
+
+func (ti tokenAndId) nonce() string {
+	return ti.tt.nonce()
+}
+
+func (ti tokenAndId) String() string {
+	return string(ti.tt)
+}
+
+func tokensWithIds(q []token) []tokenAndId {
+	out := make([]tokenAndId, len(q))
+	for i, tt := range q {
+		out[i].tt = tt
+		out[i].bid = tt.id()
+	}
+	return out
 }
 
 func (f *flusher) run() (err error) {
@@ -37,7 +63,8 @@ func (f *flusher) run() (err error) {
 
 	f.debugf("Processing %s", f.goal)
 	seen := make(map[bson.ObjectId]*transaction)
-	if err := f.recurse(f.goal, seen); err != nil {
+	preloaded := make(map[bson.ObjectId]*transaction)
+	if err := f.recurse(f.goal, seen, preloaded); err != nil {
 		return err
 	}
 	if f.goal.done() {
@@ -129,25 +156,53 @@ func (f *flusher) run() (err error) {
 	return nil
 }
 
-func (f *flusher) recurse(t *transaction, seen map[bson.ObjectId]*transaction) error {
+const preloadBatchSize = 100
+
+func (f *flusher) recurse(t *transaction, seen map[bson.ObjectId]*transaction, preloaded map[bson.ObjectId]*transaction) error {
 	seen[t.Id] = t
+	delete(preloaded, t.Id)
 	err := f.advance(t, nil, false)
 	if err != errPreReqs {
 		return err
 	}
 	for _, dkey := range t.docKeys() {
+		remaining := make([]bson.ObjectId, 0, len(f.queue[dkey]))
+		toPreload := make(map[bson.ObjectId]struct{}, len(f.queue[dkey]))
 		for _, dtt := range f.queue[dkey] {
 			id := dtt.id()
-			if seen[id] != nil {
+			if _, scheduled := toPreload[id]; seen[id] != nil || scheduled || preloaded[id] != nil {
 				continue
 			}
-			qt, err := f.load(id)
+			toPreload[id] = struct{}{}
+			remaining = append(remaining, id)
+		}
+		// done with this map
+		toPreload = nil
+		for len(remaining) > 0 {
+			batch := remaining
+			if len(batch) > preloadBatchSize {
+				batch = remaining[:preloadBatchSize]
+			}
+			remaining = remaining[len(batch):]
+			err := f.loadMulti(batch, preloaded)
 			if err != nil {
 				return err
 			}
-			err = f.recurse(qt, seen)
-			if err != nil {
-				return err
+			for _, id := range batch {
+				if seen[id] != nil {
+					continue
+				}
+				qt, ok := preloaded[id]
+				if !ok {
+					qt, err = f.load(id)
+					if err != nil {
+						return err
+					}
+				}
+				err = f.recurse(qt, seen, preloaded)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -245,10 +300,20 @@ NextDoc:
 		change.Upsert = false
 		chaos("")
 		if _, err := cquery.Apply(change, &info); err == nil {
+			if f.opts.MaxTxnQueueLength > 0 && len(info.Queue) > f.opts.MaxTxnQueueLength {
+				// abort with TXN Queue too long, but remove the entry we just added
+				innerErr := c.UpdateId(dkey.Id,
+					bson.D{{"$pullAll", bson.D{{"txn-queue", []token{tt}}}}})
+				if innerErr != nil {
+					f.debugf("error while backing out of queue-too-long: %v", innerErr)
+				}
+				return nil, fmt.Errorf("txn-queue for %v in %q has too many transactions (%d)",
+					dkey.Id, dkey.C, len(info.Queue))
+			}
 			if info.Remove == "" {
 				// Fast path, unless workload is insert/remove heavy.
 				revno[dkey] = info.Revno
-				f.queue[dkey] = info.Queue
+				f.queue[dkey] = tokensWithIds(info.Queue)
 				f.debugf("[A] Prepared document %v with revno %d and queue: %v", dkey, info.Revno, info.Queue)
 				continue NextDoc
 			} else {
@@ -310,7 +375,7 @@ NextDoc:
 					f.debugf("[B] Prepared document %v with revno %d and queue: %v", dkey, info.Revno, info.Queue)
 				}
 				revno[dkey] = info.Revno
-				f.queue[dkey] = info.Queue
+				f.queue[dkey] = tokensWithIds(info.Queue)
 				continue NextDoc
 			}
 		}
@@ -452,7 +517,7 @@ func (f *flusher) rescan(t *transaction, force bool) (revnos []int64, err error)
 				break
 			}
 		}
-		f.queue[dkey] = info.Queue
+		f.queue[dkey] = tokensWithIds(info.Queue)
 		if !found {
 			// Rescanned transaction id was not in the queue. This could mean one
 			// of three things:
@@ -516,12 +581,13 @@ func assembledRevnos(ops []Op, revno map[docKey]int64) []int64 {
 
 func (f *flusher) hasPreReqs(tt token, dkeys docKeys) (prereqs, found bool) {
 	found = true
+	ttId := tt.id()
 NextDoc:
 	for _, dkey := range dkeys {
 		for _, dtt := range f.queue[dkey] {
-			if dtt == tt {
+			if dtt.tt == tt {
 				continue NextDoc
-			} else if dtt.id() != tt.id() {
+			} else if dtt.id() != ttId {
 				prereqs = true
 			}
 		}
@@ -909,17 +975,17 @@ func (f *flusher) apply(t *transaction, pull map[bson.ObjectId]*transaction) err
 	return nil
 }
 
-func tokensToPull(dqueue []token, pull map[bson.ObjectId]*transaction, dontPull token) []token {
+func tokensToPull(dqueue []tokenAndId, pull map[bson.ObjectId]*transaction, dontPull token) []token {
 	var result []token
 	for j := len(dqueue) - 1; j >= 0; j-- {
 		dtt := dqueue[j]
-		if dtt == dontPull {
+		if dtt.tt == dontPull {
 			continue
 		}
 		if _, ok := pull[dtt.id()]; ok {
 			// It was handled before and this is a leftover invalid
 			// nonce in the queue. Cherry-pick it out.
-			result = append(result, dtt)
+			result = append(result, dtt.tt)
 		}
 	}
 	return result

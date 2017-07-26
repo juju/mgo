@@ -621,6 +621,90 @@ func (s *S) TestTxnQueueStashStressTest(c *C) {
 	}
 }
 
+func (s *S) checkTxnQueueLength(c *C, expectedQueueLength int) {
+	txn.SetDebug(false)
+	txn.SetChaos(txn.Chaos{
+		KillChance: 1,
+		Breakpoint: "set-applying",
+	})
+	defer txn.SetChaos(txn.Chaos{})
+	err := s.accounts.Insert(M{"_id": 0, "balance": 100})
+	c.Assert(err, IsNil)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: M{"$inc": M{"balance": 100}},
+	}}
+	for i := 0; i < expectedQueueLength; i++ {
+		err := s.runner.Run(ops, "", nil)
+		c.Assert(err, Equals, txn.ErrChaos)
+	}
+	txn.SetDebug(true)
+	// Now that we've filled up the queue, we should see that there are 1000
+	// items in the queue, and the error applying a new one will change.
+	var doc bson.M
+	err = s.accounts.FindId(0).One(&doc)
+	c.Assert(err, IsNil)
+	c.Check(len(doc["txn-queue"].([]interface{})), Equals, expectedQueueLength)
+	err = s.runner.Run(ops, "", nil)
+	c.Check(err, ErrorMatches, `txn-queue for 0 in "accounts" has too many transactions \(\d+\)`)
+	// The txn-queue should not have grown
+	err = s.accounts.FindId(0).One(&doc)
+	c.Assert(err, IsNil)
+	c.Check(len(doc["txn-queue"].([]interface{})), Equals, expectedQueueLength)
+}
+
+func (s *S) TestTxnQueueDefaultMaxSize(c *C) {
+	s.runner.SetOptions(txn.DefaultRunnerOptions())
+	s.checkTxnQueueLength(c, 1000)
+}
+
+func (s *S) TestTxnQueueCustomMaxSize(c *C) {
+	opts := txn.DefaultRunnerOptions()
+	opts.MaxTxnQueueLength = 100
+	s.runner.SetOptions(opts)
+	s.checkTxnQueueLength(c, 100)
+}
+
+func (s *S) TestTxnQueueUnlimited(c *C) {
+	opts := txn.DefaultRunnerOptions()
+	// A value of 0 should mean 'unlimited'
+	opts.MaxTxnQueueLength = 0
+	s.runner.SetOptions(opts)
+	// it isn't possible to actually prove 'unlimited' but we can prove that
+	// we at least can insert more than the default number of transactions
+	// without getting a 'too many transactions' failure.
+	txn.SetDebug(false)
+	txn.SetChaos(txn.Chaos{
+		KillChance: 1,
+		// Use set-prepared because we are adding more transactions than
+		// other tests, and this speeds up setup time a bit
+		Breakpoint: "set-prepared",
+	})
+	defer txn.SetChaos(txn.Chaos{})
+	err := s.accounts.Insert(M{"_id": 0, "balance": 100})
+	c.Assert(err, IsNil)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: M{"$inc": M{"balance": 100}},
+	}}
+	for i := 0; i < 1100; i++ {
+		err := s.runner.Run(ops, "", nil)
+		c.Assert(err, Equals, txn.ErrChaos)
+	}
+	txn.SetDebug(true)
+	var doc bson.M
+	err = s.accounts.FindId(0).One(&doc)
+	c.Assert(err, IsNil)
+	c.Check(len(doc["txn-queue"].([]interface{})), Equals, 1100)
+	err = s.runner.Run(ops, "", nil)
+	c.Check(err, Equals, txn.ErrChaos)
+	err = s.accounts.FindId(0).One(&doc)
+	c.Assert(err, IsNil)
+	c.Check(len(doc["txn-queue"].([]interface{})), Equals, 1101)
+}
+
 func (s *S) TestPurgeMissingPipelineSizeLimit(c *C) {
 	// This test ensures that PurgeMissing can handle very large
 	// txn-queue fields. Previous iterations of PurgeMissing would
@@ -703,6 +787,8 @@ func (s *S) TestPurgeMissingPipelineSizeLimit(c *C) {
 }
 
 var flaky = flag.Bool("flaky", false, "Include flaky tests")
+var txnQueueLength = flag.Int("qlength", 100, "txn-queue length for tests")
+
 
 func (s *S) TestTxnQueueStressTest(c *C) {
 	// This fails about 20% of the time on Mongo 3.2 (I haven't tried
@@ -776,3 +862,117 @@ func (s *S) TestTxnQueueStressTest(c *C) {
 		}
 	}
 }
+
+type txnQueue struct {
+	Queue []string `bson:"txn-queue"`
+}
+
+func (s *S) TestTxnQueueAssertionGrowth(c *C) {
+	txn.SetDebug(false) // too much spam
+	err := s.accounts.Insert(M{"_id": 0, "balance": 0})
+	c.Assert(err, IsNil)
+	// Create many assertion only transactions.
+	t := time.Now()
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: M{"balance": 0},
+	}}
+	for n := 0; n < *txnQueueLength; n++ {
+		err = s.runner.Run(ops, "", nil)
+		c.Assert(err, IsNil)
+	}
+	var qdoc txnQueue
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	c.Check(len(qdoc.Queue), Equals, *txnQueueLength)
+	c.Logf("%8.3fs to set up %d assertions", time.Since(t).Seconds(), *txnQueueLength)
+	t = time.Now()
+	txn.SetChaos(txn.Chaos{})
+	ops = []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: M{"$inc": M{"balance": 100}},
+	}}
+	err = s.runner.Run(ops, "", nil)
+	c.Logf("%8.3fs to clear N=%d assertions and add one more txn",
+		time.Since(t).Seconds(), *txnQueueLength)
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	c.Check(len(qdoc.Queue), Equals, 1)
+}
+
+func (s *S) TestTxnQueueBrokenPrepared(c *C) {
+	txn.SetDebug(false) // too much spam
+	badTxnToken := "123456789012345678901234_deadbeef"
+	err := s.accounts.Insert(M{"_id": 0, "balance": 0, "txn-queue": []string{badTxnToken}})
+	c.Assert(err, IsNil)
+	t := time.Now()
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: M{"$set": M{"balance": 0}},
+	}}
+	errString := `cannot find transaction ObjectIdHex("123456789012345678901234")`
+	for n := 0; n < *txnQueueLength; n++ {
+		err = s.runner.Run(ops, "", nil)
+		c.Assert(err.Error(), Equals, errString)
+	}
+	var qdoc txnQueue
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	c.Check(len(qdoc.Queue), Equals, *txnQueueLength+1)
+	c.Logf("%8.3fs to set up %d 'prepared' txns", time.Since(t).Seconds(), *txnQueueLength)
+	t = time.Now()
+	s.accounts.UpdateId(0, bson.M{"$pullAll": bson.M{"txn-queue": []string{badTxnToken}}})
+	ops = []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: M{"$inc": M{"balance": 100}},
+	}}
+	err = s.runner.ResumeAll()
+	c.Assert(err, IsNil)
+	c.Logf("%8.3fs to ResumeAll N=%d 'prepared' txns",
+		time.Since(t).Seconds(), *txnQueueLength)
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	c.Check(len(qdoc.Queue), Equals, 1)
+}
+
+func (s *S) TestTxnQueuePreparing(c *C) {
+	txn.SetDebug(false) // too much spam
+	err := s.accounts.Insert(M{"_id": 0, "balance": 0, "txn-queue": []string{}})
+	c.Assert(err, IsNil)
+	t := time.Now()
+	txn.SetChaos(txn.Chaos{
+		KillChance: 1.0,
+		Breakpoint: "set-prepared",
+	})
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: M{"$set": M{"balance": 0}},
+	}}
+	for n := 0; n < *txnQueueLength; n++ {
+		err = s.runner.Run(ops, "", nil)
+		c.Assert(err, Equals, txn.ErrChaos)
+	}
+	var qdoc txnQueue
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	c.Check(len(qdoc.Queue), Equals, *txnQueueLength)
+	c.Logf("%8.3fs to set up %d 'preparing' txns", time.Since(t).Seconds(), *txnQueueLength)
+	txn.SetChaos(txn.Chaos{})
+	t = time.Now()
+	err = s.runner.ResumeAll()
+	c.Logf("%8.3fs to ResumeAll N=%d 'preparing' txns",
+		time.Since(t).Seconds(), *txnQueueLength)
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	expectedCount := 100
+	if *txnQueueLength <= expectedCount {
+		expectedCount = *txnQueueLength - 1
+	}
+	c.Check(len(qdoc.Queue), Equals, expectedCount)
+}
+

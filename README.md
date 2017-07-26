@@ -15,17 +15,23 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Support majority read concerns ([details](https://github.com/globalsign/mgo/pull/2))
 * Improved connection handling ([details](https://github.com/globalsign/mgo/pull/5))
 * Hides SASL warnings ([details](https://github.com/globalsign/mgo/pull/7))
-* Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11))
-* Integration tests run against newest MongoDB 3.2 releases ([details](https://github.com/globalsign/mgo/pull/4))
 * Support for partial indexes ([detials](https://github.com/domodwyer/mgo/commit/5efe8eccb028238d93c222828cae4806aeae9f51))
+* Fixes timezone handling ([details](https://github.com/go-mgo/mgo/pull/464)) 
+* Integration tests run against newest MongoDB 3.2 releases ([details](https://github.com/globalsign/mgo/pull/4))
+* Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11), [more](https://github.com/globalsign/mgo/pull/16))
+* Fixes cursor timeouts ([detials](https://jira.mongodb.org/browse/SERVER-24899))
+* Support index hints and timeouts for count queries ([details](https://github.com/globalsign/mgo/pull/17))
 
 ---
 
 ### Thanks to
+* @BenLubar
 * @carter2000
 * @cezarsa
-* @eaglerayp
 * @drichelson
+* @eaglerayp
+* @fmpwizard
 * @jameinel
+* @Reenjii
 * @smoya
 * @wgallagher
