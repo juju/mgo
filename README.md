@@ -21,7 +21,8 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11), [more](https://github.com/globalsign/mgo/pull/16))
 * Fixes cursor timeouts ([details](https://jira.mongodb.org/browse/SERVER-24899))
 * Support index hints and timeouts for count queries ([details](https://github.com/globalsign/mgo/pull/17))
-* Allow dropping all indexes on a collection ([details](https://github.com/globalsign/mgo/pull/25))
+* Don't panic when handling indexed `int64` fields ([detials](https://github.com/go-mgo/mgo/issues/475))
+* Supports dropping all indexes on a collection ([details](https://github.com/globalsign/mgo/pull/25))
 * Annotates log entries/profiler output with optional appName on 3.4+ ([details](https://github.com/globalsign/mgo/pull/28))
 * Support for read-only [views](https://docs.mongodb.com/manual/core/views/) in 3.4+ ([details](https://github.com/globalsign/mgo/pull/33))
 
@@ -36,6 +37,7 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * @feliixx
 * @fmpwizard
 * @jameinel
+* @mapete94
 * @Reenjii
 * @smoya
 * @wgallagher
