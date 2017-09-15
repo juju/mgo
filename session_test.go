@@ -413,11 +413,19 @@ func (s *S) TestDatabaseAndCollectionNames(c *C) {
 
 	names, err = db1.CollectionNames()
 	c.Assert(err, IsNil)
-	c.Assert(names, DeepEquals, []string{"col1", "col2", "system.indexes"})
+	if s.versionAtLeast(3, 4) {
+		c.Assert(names, DeepEquals, []string{"col1", "col2"})
+	} else {
+		c.Assert(names, DeepEquals, []string{"col1", "col2", "system.indexes"})
+	}
 
 	names, err = db2.CollectionNames()
 	c.Assert(err, IsNil)
-	c.Assert(names, DeepEquals, []string{"col3", "system.indexes"})
+	if s.versionAtLeast(3, 4) {
+		c.Assert(names, DeepEquals, []string{"col3"})
+	} else {
+		c.Assert(names, DeepEquals, []string{"col3", "system.indexes"})
+	}
 }
 
 func (s *S) TestSelect(c *C) {
@@ -872,14 +880,22 @@ func (s *S) TestDropCollection(c *C) {
 
 	names, err := db.CollectionNames()
 	c.Assert(err, IsNil)
-	c.Assert(names, DeepEquals, []string{"col2", "system.indexes"})
+	if s.versionAtLeast(3, 4) {
+		c.Assert(names, DeepEquals, []string{"col2"})
+	} else {
+		c.Assert(names, DeepEquals, []string{"col2", "system.indexes"})
+	}
 
 	err = db.C("col2").DropCollection()
 	c.Assert(err, IsNil)
 
 	names, err = db.CollectionNames()
 	c.Assert(err, IsNil)
-	c.Assert(names, DeepEquals, []string{"system.indexes"})
+	if s.versionAtLeast(3, 4) {
+		c.Assert(len(names), Equals, 0)
+	} else {
+		c.Assert(names, DeepEquals, []string{"system.indexes"})
+	}
 }
 
 func (s *S) TestCreateCollectionCapped(c *C) {
@@ -1387,6 +1403,11 @@ func (s *S) TestView(c *C) {
 }
 
 func (s *S) TestViewWithCollation(c *C) {
+	// This test is currently failing because of a bug in mongodb. A ticket describing
+	// the issue is available here: https://jira.mongodb.org/browse/SERVER-31049
+	// TODO remove this line when SERVER-31049 is fixed
+	c.Skip("Fails because of a MongoDB bug as of version 3.4.9, cf https://jira.mongodb.org/browse/SERVER-31049")
+
 	if !s.versionAtLeast(3, 4) {
 		c.Skip("depends on mongodb 3.4+")
 	}
@@ -2096,6 +2117,9 @@ func serverCursorsOpen(session *mgo.Session) int {
 }
 
 func (s *S) TestFindIterLimitWithMore(c *C) {
+	if s.versionAtLeast(3, 4) {
+		c.Skip("fail on 3.4+")
+	}
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3437,13 +3461,35 @@ var indexTests = []struct {
 	},
 }}
 
+// getIndex34 uses the listIndexes command to obtain a list of indexes on
+// collection, and searches through the result looking for an index with name.
+// This can only be used in 3.4+.
+//
+// The default "_id_" index is never returned, and the "v" field is removed from
+// the response.
+func getIndex34(session *mgo.Session, db, collection, name string) M {
+	cmd := bson.M{"listIndexes": collection}
+	result := M{}
+	session.DB(db).Run(cmd, result)
+
+	var obtained = M{}
+	for _, v := range result["cursor"].(M)["firstBatch"].([]interface{}) {
+		index := v.(M)
+		if index["name"] == name {
+			delete(index, "v")
+			obtained = index
+			break
+		}
+	}
+	return obtained
+}
+
 func (s *S) TestEnsureIndex(c *C) {
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	coll := session.DB("mydb").C("mycoll")
-	idxs := session.DB("mydb").C("system.indexes")
 
 	for _, test := range indexTests {
 		if !s.versionAtLeast(2, 4) && test.expected["textIndexVersion"] != nil {
@@ -3467,12 +3513,6 @@ func (s *S) TestEnsureIndex(c *C) {
 			expectedName, _ = test.expected["name"].(string)
 		}
 
-		obtained := M{}
-		err = idxs.Find(M{"name": expectedName}).One(obtained)
-		c.Assert(err, IsNil)
-
-		delete(obtained, "v")
-
 		if s.versionAtLeast(2, 7) {
 			// Was deprecated in 2.6, and not being reported by 2.7+.
 			delete(test.expected, "dropDups")
@@ -3482,7 +3522,22 @@ func (s *S) TestEnsureIndex(c *C) {
 			test.expected["textIndexVersion"] = 3
 		}
 
-		c.Assert(obtained, DeepEquals, test.expected)
+		// As of 3.4.X, "system.indexes" is no longer available - instead use:
+		//
+		// 		db.runCommand({"listIndexes": <collectionName>})
+		//
+		// and iterate over the returned cursor.
+		if s.versionAtLeast(3, 4) {
+			c.Assert(getIndex34(session, "mydb", "mycoll", test.expected["name"].(string)), DeepEquals, test.expected)
+		} else {
+			idxs := session.DB("mydb").C("system.indexes")
+			obtained := M{}
+			err = idxs.Find(M{"name": expectedName}).One(obtained)
+			c.Assert(err, IsNil)
+
+			delete(obtained, "v")
+			c.Assert(obtained, DeepEquals, test.expected)
+		}
 
 		// The result of Indexes must match closely what was used to create the index.
 		indexes, err := coll.Indexes()
@@ -3582,34 +3637,53 @@ func (s *S) TestEnsureIndexKey(c *C) {
 	err = coll.EnsureIndexKey("a")
 	c.Assert(err, IsNil)
 
-	err = coll.EnsureIndexKey("a", "-b")
-	c.Assert(err, IsNil)
+	if s.versionAtLeast(3, 4) {
+		expected := M{
+			"name": "a_1",
+			"key":  M{"a": 1},
+			"ns":   "mydb.mycoll",
+		}
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1"), DeepEquals, expected)
 
-	sysidx := session.DB("mydb").C("system.indexes")
+		err = coll.EnsureIndexKey("a", "-b")
+		c.Assert(err, IsNil)
 
-	result1 := M{}
-	err = sysidx.Find(M{"name": "a_1"}).One(result1)
-	c.Assert(err, IsNil)
+		expected = M{
+			"name": "a_1_b_-1",
+			"key":  M{"a": 1, "b": -1},
+			"ns":   "mydb.mycoll",
+		}
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1_b_-1"), DeepEquals, expected)
+	} else {
+		err = coll.EnsureIndexKey("a", "-b")
+		c.Assert(err, IsNil)
 
-	result2 := M{}
-	err = sysidx.Find(M{"name": "a_1_b_-1"}).One(result2)
-	c.Assert(err, IsNil)
+		sysidx := session.DB("mydb").C("system.indexes")
 
-	delete(result1, "v")
-	expected1 := M{
-		"name": "a_1",
-		"key":  M{"a": 1},
-		"ns":   "mydb.mycoll",
+		result1 := M{}
+		err = sysidx.Find(M{"name": "a_1"}).One(result1)
+		c.Assert(err, IsNil)
+
+		result2 := M{}
+		err = sysidx.Find(M{"name": "a_1_b_-1"}).One(result2)
+		c.Assert(err, IsNil)
+
+		delete(result1, "v")
+		expected1 := M{
+			"name": "a_1",
+			"key":  M{"a": 1},
+			"ns":   "mydb.mycoll",
+		}
+		c.Assert(result1, DeepEquals, expected1)
+
+		delete(result2, "v")
+		expected2 := M{
+			"name": "a_1_b_-1",
+			"key":  M{"a": 1, "b": -1},
+			"ns":   "mydb.mycoll",
+		}
+		c.Assert(result2, DeepEquals, expected2)
 	}
-	c.Assert(result1, DeepEquals, expected1)
-
-	delete(result2, "v")
-	expected2 := M{
-		"name": "a_1_b_-1",
-		"key":  M{"a": 1, "b": -1},
-		"ns":   "mydb.mycoll",
-	}
-	c.Assert(result2, DeepEquals, expected2)
 }
 
 func (s *S) TestEnsureIndexDropIndex(c *C) {
@@ -3628,22 +3702,44 @@ func (s *S) TestEnsureIndexDropIndex(c *C) {
 	err = coll.DropIndex("-b")
 	c.Assert(err, IsNil)
 
-	sysidx := session.DB("mydb").C("system.indexes")
+	if s.versionAtLeast(3, 4) {
+		// system.indexes is deprecated since 3.0, use
+		// db.runCommand({"listIndexes": <collectionName>})
+		// instead
 
-	err = sysidx.Find(M{"name": "a_1"}).One(nil)
-	c.Assert(err, IsNil)
+		// Assert it exists
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1"), DeepEquals, M{"key": M{"a": 1}, "name": "a_1", "ns": "mydb.mycoll"})
 
-	err = sysidx.Find(M{"name": "b_1"}).One(nil)
-	c.Assert(err, Equals, mgo.ErrNotFound)
+		// Assert a missing index returns an empty M{}
+		c.Assert(getIndex34(session, "mydb", "mycoll", "b_1"), DeepEquals, M{})
 
-	err = coll.DropIndex("a")
-	c.Assert(err, IsNil)
+		err = coll.DropIndex("a")
+		c.Assert(err, IsNil)
 
-	err = sysidx.Find(M{"name": "a_1"}).One(nil)
-	c.Assert(err, Equals, mgo.ErrNotFound)
+		// Ensure missing
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1"), DeepEquals, M{})
 
-	err = coll.DropIndex("a")
-	c.Assert(err, ErrorMatches, "index not found.*")
+		// Try to drop it again
+		err = coll.DropIndex("a")
+		c.Assert(err, ErrorMatches, "index not found.*")
+	} else {
+		sysidx := session.DB("mydb").C("system.indexes")
+
+		err = sysidx.Find(M{"name": "a_1"}).One(nil)
+		c.Assert(err, IsNil)
+
+		err = sysidx.Find(M{"name": "b_1"}).One(nil)
+		c.Assert(err, Equals, mgo.ErrNotFound)
+
+		err = coll.DropIndex("a")
+		c.Assert(err, IsNil)
+
+		err = sysidx.Find(M{"name": "a_1"}).One(nil)
+		c.Assert(err, Equals, mgo.ErrNotFound)
+
+		err = coll.DropIndex("a")
+		c.Assert(err, ErrorMatches, "index not found.*")
+	}
 }
 
 func (s *S) TestEnsureIndexDropIndexName(c *C) {
@@ -3661,23 +3757,44 @@ func (s *S) TestEnsureIndexDropIndexName(c *C) {
 
 	err = coll.DropIndexName("a")
 	c.Assert(err, IsNil)
+	if s.versionAtLeast(3, 4) {
+		// system.indexes is deprecated since 3.0, use
+		// db.runCommand({"listIndexes": <collectionName>})
+		// instead
 
-	sysidx := session.DB("mydb").C("system.indexes")
+		// Assert it exists
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1"), DeepEquals, M{"ns": "mydb.mycoll", "key": M{"a": 1}, "name": "a_1"})
 
-	err = sysidx.Find(M{"name": "a_1"}).One(nil)
-	c.Assert(err, IsNil)
+		// Assert M{} is returned for a missing index
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a"), DeepEquals, M{})
 
-	err = sysidx.Find(M{"name": "a"}).One(nil)
-	c.Assert(err, Equals, mgo.ErrNotFound)
+		err = coll.DropIndexName("a_1")
+		c.Assert(err, IsNil)
 
-	err = coll.DropIndexName("a_1")
-	c.Assert(err, IsNil)
+		// Ensure it's gone
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1"), DeepEquals, M{})
 
-	err = sysidx.Find(M{"name": "a_1"}).One(nil)
-	c.Assert(err, Equals, mgo.ErrNotFound)
+		err = coll.DropIndexName("a_1")
+		c.Assert(err, ErrorMatches, "index not found.*")
 
-	err = coll.DropIndexName("a_1")
-	c.Assert(err, ErrorMatches, "index not found.*")
+	} else {
+		sysidx := session.DB("mydb").C("system.indexes")
+
+		err = sysidx.Find(M{"name": "a_1"}).One(nil)
+		c.Assert(err, IsNil)
+
+		err = sysidx.Find(M{"name": "a"}).One(nil)
+		c.Assert(err, Equals, mgo.ErrNotFound)
+
+		err = coll.DropIndexName("a_1")
+		c.Assert(err, IsNil)
+
+		err = sysidx.Find(M{"name": "a_1"}).One(nil)
+		c.Assert(err, Equals, mgo.ErrNotFound)
+
+		err = coll.DropIndexName("a_1")
+		c.Assert(err, ErrorMatches, "index not found.*")
+	}
 }
 
 func (s *S) TestEnsureIndexDropAllIndexes(c *C) {
@@ -3696,13 +3813,21 @@ func (s *S) TestEnsureIndexDropAllIndexes(c *C) {
 	err = coll.DropAllIndexes()
 	c.Assert(err, IsNil)
 
-	sysidx := session.DB("mydb").C("system.indexes")
+	if s.versionAtLeast(3, 4) {
+		// system.indexes is deprecated since 3.0, use
+		// db.runCommand({"listIndexes": <collectionName>})
+		// instead
+		c.Assert(getIndex34(session, "mydb", "mycoll", "a_1"), DeepEquals, M{})
+		c.Assert(getIndex34(session, "mydb", "mycoll", "b_1"), DeepEquals, M{})
+	} else {
+		sysidx := session.DB("mydb").C("system.indexes")
 
-	err = sysidx.Find(M{"name": "a_1"}).One(nil)
-	c.Assert(err, Equals, mgo.ErrNotFound)
+		err = sysidx.Find(M{"name": "a_1"}).One(nil)
+		c.Assert(err, Equals, mgo.ErrNotFound)
 
-	err = sysidx.Find(M{"name": "b_1"}).One(nil)
-	c.Assert(err, Equals, mgo.ErrNotFound)
+		err = sysidx.Find(M{"name": "b_1"}).One(nil)
+		c.Assert(err, Equals, mgo.ErrNotFound)
+	}
 }
 
 func (s *S) TestEnsureIndexCaching(c *C) {
@@ -4267,6 +4392,9 @@ func (s *S) TestFsync(c *C) {
 func (s *S) TestRepairCursor(c *C) {
 	if !s.versionAtLeast(2, 7) {
 		c.Skip("RepairCursor only works on 2.7+")
+	}
+	if s.versionAtLeast(3, 4) {
+		c.Skip("fail on 3.4+")
 	}
 
 	session, err := mgo.Dial("localhost:40001")
