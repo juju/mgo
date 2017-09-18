@@ -19,8 +19,12 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * Fixes timezone handling ([details](https://github.com/go-mgo/mgo/pull/464)) 
 * Integration tests run against newest MongoDB 3.2 releases ([details](https://github.com/globalsign/mgo/pull/4), [more](https://github.com/globalsign/mgo/pull/24))
 * Improved multi-document transaction performance ([details](https://github.com/globalsign/mgo/pull/10), [more](https://github.com/globalsign/mgo/pull/11), [more](https://github.com/globalsign/mgo/pull/16))
-* Fixes cursor timeouts ([detials](https://jira.mongodb.org/browse/SERVER-24899))
+* Fixes cursor timeouts ([details](https://jira.mongodb.org/browse/SERVER-24899))
 * Support index hints and timeouts for count queries ([details](https://github.com/globalsign/mgo/pull/17))
+* Don't panic when handling indexed `int64` fields ([detials](https://github.com/go-mgo/mgo/issues/475))
+* Supports dropping all indexes on a collection ([details](https://github.com/globalsign/mgo/pull/25))
+* Annotates log entries/profiler output with optional appName on 3.4+ ([details](https://github.com/globalsign/mgo/pull/28))
+* Support for read-only [views](https://docs.mongodb.com/manual/core/views/) in 3.4+ ([details](https://github.com/globalsign/mgo/pull/33))
 
 ---
 
@@ -30,8 +34,10 @@ Further PR's (with tests) are welcome, but please maintain backwards compatibili
 * @cezarsa
 * @drichelson
 * @eaglerayp
+* @feliixx
 * @fmpwizard
 * @jameinel
+* @mapete94
 * @Reenjii
 * @smoya
 * @wgallagher
