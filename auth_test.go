@@ -28,6 +28,7 @@ package mgo_test
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -961,6 +962,57 @@ func (s *S) TestAuthX509Cred(c *C) {
 	names, err = session.DatabaseNames()
 	c.Assert(err, IsNil)
 	c.Assert(len(names) > 0, Equals, true)
+}
+
+func (s *S) TestAuthX509CredRDNConstruction(c *C) {
+	session, err := mgo.Dial("localhost:40001")
+	c.Assert(err, IsNil)
+	defer session.Close()
+	binfo, err := session.BuildInfo()
+	c.Assert(err, IsNil)
+	if binfo.OpenSSLVersion == "" {
+		c.Skip("server does not support SSL")
+	}
+
+	clientCertPEM, err := ioutil.ReadFile("harness/certs/client.pem")
+	c.Assert(err, IsNil)
+
+	clientCert, err := tls.X509KeyPair(clientCertPEM, clientCertPEM)
+	c.Assert(err, IsNil)
+
+	clientCert.Leaf, err = x509.ParseCertificate(clientCert.Certificate[0])
+	c.Assert(err, IsNil)
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		Certificates:       []tls.Certificate{clientCert},
+	}
+
+	var host = "localhost:40003"
+	c.Logf("Connecting to %s...", host)
+	session, err = mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs: []string{host},
+		DialServer: func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), tlsConfig)
+		},
+	})
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	cred := &mgo.Credential{
+		Username:    "root",
+		Mechanism:   "MONGODB-X509",
+		Source:      "$external",
+		Certificate: tlsConfig.Certificates[0].Leaf,
+	}
+	err = session.Login(cred)
+	c.Assert(err, NotNil)
+
+	cred.Username = ""
+	c.Logf("Authenticating...")
+	err = session.Login(cred)
+	c.Assert(err, IsNil)
+	c.Logf("Authenticated!")
 }
 
 var (
