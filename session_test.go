@@ -44,7 +44,7 @@ import (
 )
 
 func (s *S) TestRunString(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -55,7 +55,7 @@ func (s *S) TestRunString(c *C) {
 }
 
 func (s *S) TestRunValue(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -66,7 +66,7 @@ func (s *S) TestRunValue(c *C) {
 }
 
 func (s *S) TestPing(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -86,19 +86,19 @@ func (s *S) TestPing(c *C) {
 }
 
 func (s *S) TestDialIPAddress(c *C) {
-	session, err := mgo.Dial("127.0.0.1:40001")
+	session, err := mgo.Dial("127.0.0.1:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	if os.Getenv("NOIPV6") != "1" {
-		session, err = mgo.Dial("[::1%]:40001")
+		session, err = mgo.Dial("[::1%]:40001" + expFeaturesString)
 		c.Assert(err, IsNil)
 		defer session.Close()
 	}
 }
 
 func (s *S) TestURLSingle(c *C) {
-	session, err := mgo.Dial("mongodb://localhost:40001/")
+	session, err := mgo.Dial("mongodb://localhost:40001/" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -109,7 +109,7 @@ func (s *S) TestURLSingle(c *C) {
 }
 
 func (s *S) TestURLMany(c *C) {
-	session, err := mgo.Dial("mongodb://localhost:40011,localhost:40012/")
+	session, err := mgo.Dial("mongodb://localhost:40011,localhost:40012/" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -125,7 +125,7 @@ func (s *S) TestURLParsing(c *C) {
 		"localhost:40001?foo=1;bar=2",
 	}
 	for _, url := range urls {
-		session, err := mgo.Dial(url)
+		session, err := mgo.Dial(url + "&" + string(expFeaturesString[1:]))
 		if session != nil {
 			session.Close()
 		}
@@ -205,7 +205,7 @@ func (s *S) TestURLWithAppName(c *C) {
 		c.Skip("appName depends on MongoDB 3.4+")
 	}
 	appName := "myAppName"
-	session, err := mgo.Dial("localhost:40001?appName=" + appName)
+	session, err := mgo.Dial("localhost:40001?appName=" + appName + "&" + string(expFeaturesString[1:]))
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -240,12 +240,12 @@ func (s *S) TestURLWithAppNameTooLong(c *C) {
 	}
 	appName := "myAppNameWayTooLongmyAppNameWayTooLongmyAppNameWayTooLongmyAppNameWayTooLong"
 	appName += appName
-	_, err := mgo.Dial("localhost:40001?appName=" + appName)
+	_, err := mgo.Dial("localhost:40001?appName=" + appName + "&" + string(expFeaturesString[1:]))
 	c.Assert(err, ErrorMatches, "appName too long, must be < 128 bytes: "+appName)
 }
 
 func (s *S) TestInsertFindOne(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -269,7 +269,7 @@ func (s *S) TestInsertFindOne(c *C) {
 }
 
 func (s *S) TestInsertFindOneNil(c *C) {
-	session, err := mgo.Dial("localhost:40002")
+	session, err := mgo.Dial("localhost:40002" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -279,7 +279,7 @@ func (s *S) TestInsertFindOneNil(c *C) {
 }
 
 func (s *S) TestInsertFindOneMap(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -294,7 +294,7 @@ func (s *S) TestInsertFindOneMap(c *C) {
 }
 
 func (s *S) TestInsertFindAll(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -340,7 +340,7 @@ func (s *S) TestInsertFindAll(c *C) {
 }
 
 func (s *S) TestFindRef(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -386,7 +386,7 @@ func (s *S) TestFindRef(c *C) {
 }
 
 func (s *S) TestDatabaseAndCollectionNames(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -413,23 +413,15 @@ func (s *S) TestDatabaseAndCollectionNames(c *C) {
 
 	names, err = db1.CollectionNames()
 	c.Assert(err, IsNil)
-	if s.versionAtLeast(3, 4) {
-		c.Assert(names, DeepEquals, []string{"col1", "col2"})
-	} else {
-		c.Assert(names, DeepEquals, []string{"col1", "col2", "system.indexes"})
-	}
+	c.Assert(filterDBs(names), DeepEquals, []string{"col1", "col2"})
 
 	names, err = db2.CollectionNames()
 	c.Assert(err, IsNil)
-	if s.versionAtLeast(3, 4) {
-		c.Assert(names, DeepEquals, []string{"col3"})
-	} else {
-		c.Assert(names, DeepEquals, []string{"col3", "system.indexes"})
-	}
+	c.Assert(filterDBs(names), DeepEquals, []string{"col3"})
 }
 
 func (s *S) TestSelect(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -445,7 +437,7 @@ func (s *S) TestSelect(c *C) {
 }
 
 func (s *S) TestInlineMap(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -476,7 +468,7 @@ func (s *S) TestInlineMap(c *C) {
 }
 
 func (s *S) TestUpdate(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -508,7 +500,7 @@ func (s *S) TestUpdate(c *C) {
 }
 
 func (s *S) TestUpdateId(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -536,7 +528,7 @@ func (s *S) TestUpdateId(c *C) {
 }
 
 func (s *S) TestUpdateNil(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -566,7 +558,7 @@ func (s *S) TestUpdateNil(c *C) {
 }
 
 func (s *S) TestUpsert(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -629,7 +621,7 @@ func (s *S) TestUpsert(c *C) {
 }
 
 func (s *S) TestUpsertId(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -666,7 +658,7 @@ func (s *S) TestUpsertId(c *C) {
 }
 
 func (s *S) TestUpdateAll(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -715,7 +707,7 @@ func (s *S) TestUpdateAll(c *C) {
 }
 
 func (s *S) TestRemove(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -744,7 +736,7 @@ func (s *S) TestRemove(c *C) {
 }
 
 func (s *S) TestRemoveId(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -762,7 +754,7 @@ func (s *S) TestRemoveId(c *C) {
 }
 
 func (s *S) TestRemoveUnsafe(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -782,7 +774,7 @@ func (s *S) TestRemoveUnsafe(c *C) {
 }
 
 func (s *S) TestRemoveAll(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -825,7 +817,7 @@ func (s *S) TestRemoveAll(c *C) {
 }
 
 func (s *S) TestDropDatabase(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -854,7 +846,7 @@ func filterDBs(dbs []string) []string {
 	var i int
 	for _, name := range dbs {
 		switch name {
-		case "admin", "local":
+		case "admin", "local", "config", "system.indexes":
 		default:
 			dbs[i] = name
 			i++
@@ -867,7 +859,7 @@ func filterDBs(dbs []string) []string {
 }
 
 func (s *S) TestDropCollection(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -880,26 +872,18 @@ func (s *S) TestDropCollection(c *C) {
 
 	names, err := db.CollectionNames()
 	c.Assert(err, IsNil)
-	if s.versionAtLeast(3, 4) {
-		c.Assert(names, DeepEquals, []string{"col2"})
-	} else {
-		c.Assert(names, DeepEquals, []string{"col2", "system.indexes"})
-	}
+	c.Assert(filterDBs(names), DeepEquals, []string{"col2"})
 
 	err = db.C("col2").DropCollection()
 	c.Assert(err, IsNil)
 
 	names, err = db.CollectionNames()
 	c.Assert(err, IsNil)
-	if s.versionAtLeast(3, 4) {
-		c.Assert(len(names), Equals, 0)
-	} else {
-		c.Assert(names, DeepEquals, []string{"system.indexes"})
-	}
+	c.Assert(len(filterDBs(names)), Equals, 0)
 }
 
 func (s *S) TestCreateCollectionCapped(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -925,7 +909,7 @@ func (s *S) TestCreateCollectionCapped(c *C) {
 }
 
 func (s *S) TestCreateCollectionNoIndex(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -945,7 +929,7 @@ func (s *S) TestCreateCollectionNoIndex(c *C) {
 }
 
 func (s *S) TestCreateCollectionForceIndex(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -971,7 +955,7 @@ func (s *S) TestCreateCollectionValidator(c *C) {
 	if !s.versionAtLeast(3, 2) {
 		c.Skip("validation depends on MongoDB 3.2+")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1023,7 +1007,7 @@ func (s *S) TestCreateCollectionStorageEngine(c *C) {
 	if !s.versionAtLeast(3, 0) {
 		c.Skip("storageEngine option depends on MongoDB 3.0+")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1041,7 +1025,7 @@ func (s *S) TestCreateCollectionWithCollation(c *C) {
 	if !s.versionAtLeast(3, 4) {
 		c.Skip("depends on mongodb 3.4+")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1085,7 +1069,7 @@ func (s *S) TestIsDupValues(c *C) {
 }
 
 func (s *S) TestIsDupPrimary(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1099,7 +1083,7 @@ func (s *S) TestIsDupPrimary(c *C) {
 }
 
 func (s *S) TestIsDupUnique(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1121,7 +1105,7 @@ func (s *S) TestIsDupUnique(c *C) {
 }
 
 func (s *S) TestIsDupCapped(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1145,7 +1129,7 @@ func (s *S) TestIsDupCapped(c *C) {
 }
 
 func (s *S) TestIsDupFindAndModify(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1164,7 +1148,7 @@ func (s *S) TestIsDupFindAndModify(c *C) {
 }
 
 func (s *S) TestIsDupRetryUpsert(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1184,7 +1168,7 @@ func (s *S) TestIsDupRetryUpsert(c *C) {
 }
 
 func (s *S) TestFindAndModify(c *C) {
-	session, err := mgo.Dial("localhost:40011")
+	session, err := mgo.Dial("localhost:40011" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1252,7 +1236,7 @@ func (s *S) TestFindAndModify(c *C) {
 }
 
 func (s *S) TestFindAndModifyBug997828(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1263,24 +1247,18 @@ func (s *S) TestFindAndModifyBug997828(c *C) {
 	result := make(M)
 	_, err = coll.Find(M{"n": "not-a-number"}).Apply(mgo.Change{Update: M{"$inc": M{"n": 1}}}, result)
 	c.Assert(err, ErrorMatches, `(exception: )?Cannot apply \$inc .*`)
-	if s.versionAtLeast(2, 1) {
-		qerr, _ := err.(*mgo.QueryError)
-		c.Assert(qerr, NotNil, Commentf("err: %#v", err))
-		if s.versionAtLeast(2, 6) {
-			// Oh, the dance of error codes. :-(
-			c.Assert(qerr.Code, Equals, 16837)
-		} else {
-			c.Assert(qerr.Code, Equals, 10140)
-		}
+	qerr, _ := err.(*mgo.QueryError)
+	c.Assert(qerr, NotNil, Commentf("err: %#v", err))
+	if s.versionAtLeast(3, 6) {
+		// Oh, the dance of error codes. :-(
+		c.Assert(qerr.Code, Equals, 14)
 	} else {
-		lerr, _ := err.(*mgo.LastError)
-		c.Assert(lerr, NotNil, Commentf("err: %#v", err))
-		c.Assert(lerr.Code, Equals, 10140)
+		c.Assert(qerr.Code, Equals, 16837)
 	}
 }
 
 func (s *S) TestFindAndModifyErrmsgDoc(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1294,7 +1272,7 @@ func (s *S) TestFindAndModifyErrmsgDoc(c *C) {
 }
 
 func (s *S) TestCountCollection(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1316,7 +1294,7 @@ func (s *S) TestView(c *C) {
 		c.Skip("depends on mongodb 3.4+")
 	}
 	// CreateView has to be run against mongos
-	session, err := mgo.Dial("localhost:40201")
+	session, err := mgo.Dial("localhost:40201" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1404,16 +1382,12 @@ func (s *S) TestView(c *C) {
 }
 
 func (s *S) TestViewWithCollation(c *C) {
-	// This test is currently failing because of a bug in mongodb. A ticket describing
-	// the issue is available here: https://jira.mongodb.org/browse/SERVER-31049
-	// TODO remove this line when SERVER-31049 is fixed
-	c.Skip("Fails because of a MongoDB bug as of version 3.4.9, cf https://jira.mongodb.org/browse/SERVER-31049")
-
-	if !s.versionAtLeast(3, 4) {
+	// SERVER-31049 is fixed in 3.4.10
+	if !s.versionAtLeast(3, 4, 10) {
 		c.Skip("depends on mongodb 3.4+")
 	}
 	// CreateView has to be run against mongos
-	session, err := mgo.Dial("localhost:40201")
+	session, err := mgo.Dial("localhost:40201" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1442,7 +1416,7 @@ func (s *S) TestViewWithCollation(c *C) {
 }
 
 func (s *S) TestCountQuery(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1460,7 +1434,7 @@ func (s *S) TestCountQuery(c *C) {
 }
 
 func (s *S) TestCountQuerySorted(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1478,7 +1452,7 @@ func (s *S) TestCountQuerySorted(c *C) {
 }
 
 func (s *S) TestCountSkipLimit(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1504,7 +1478,7 @@ func (s *S) TestCountMaxTimeMS(c *C) {
 		c.Skip("SetMaxTime only supported in 2.6+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1527,7 +1501,7 @@ func (s *S) TestCountHint(c *C) {
 		c.Skip("Not implemented until mongo 2.5.5 https://jira.mongodb.org/browse/SERVER-2677")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1543,7 +1517,7 @@ func (s *S) TestCountHint(c *C) {
 }
 
 func (s *S) TestQueryExplain(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1578,7 +1552,7 @@ func (s *S) TestQueryExplain(c *C) {
 }
 
 func (s *S) TestQuerySetMaxScan(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 	coll := session.DB("mydb").C("mycoll")
@@ -1601,7 +1575,7 @@ func (s *S) TestQuerySetMaxTime(c *C) {
 		c.Skip("SetMaxTime only supported in 2.6+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 	coll := session.DB("mydb").C("mycoll")
@@ -1620,7 +1594,7 @@ func (s *S) TestQuerySetMaxTime(c *C) {
 }
 
 func (s *S) TestQueryHint(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1643,14 +1617,14 @@ func (s *S) TestQueryHint(c *C) {
 }
 
 func (s *S) TestQueryComment(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	db := session.DB("mydb")
 	coll := db.C("mycoll")
 
-	err = db.Run(bson.M{"profile": 2}, nil)
+	err = db.Run(bson.D{{Name: "profile", Value: 2}}, nil)
 	c.Assert(err, IsNil)
 
 	ns := []int{40, 41, 42}
@@ -1672,16 +1646,24 @@ func (s *S) TestQueryComment(c *C) {
 	commentField := "query.$comment"
 	nField := "query.$query.n"
 	if s.versionAtLeast(3, 2) {
-		commentField = "query.comment"
-		nField = "query.filter.n"
+		if s.versionAtLeast(3, 6) {
+			commentField = "command.comment"
+			nField = "command.filter.n"
+		} else {
+			commentField = "query.comment"
+			nField = "query.filter.n"
+		}
 	}
 	n, err := session.DB("mydb").C("system.profile").Find(bson.M{nField: 41, commentField: "some comment"}).Count()
 	c.Assert(err, IsNil)
 	c.Assert(n, Equals, 1)
+
+	err = db.Run(bson.D{{Name: "profile", Value: 0}}, nil)
+	c.Assert(err, IsNil)
 }
 
 func (s *S) TestFindOneNotFound(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1695,7 +1677,7 @@ func (s *S) TestFindOneNotFound(c *C) {
 }
 
 func (s *S) TestFindIterNotFound(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1709,7 +1691,7 @@ func (s *S) TestFindIterNotFound(c *C) {
 }
 
 func (s *S) TestFindNil(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1725,7 +1707,7 @@ func (s *S) TestFindNil(c *C) {
 }
 
 func (s *S) TestFindId(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1743,7 +1725,7 @@ func (s *S) TestFindId(c *C) {
 }
 
 func (s *S) TestFindIterAll(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1789,7 +1771,7 @@ func (s *S) TestFindIterAll(c *C) {
 }
 
 func (s *S) TestFindIterTwiceWithSameQuery(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1815,7 +1797,7 @@ func (s *S) TestFindIterTwiceWithSameQuery(c *C) {
 }
 
 func (s *S) TestFindIterWithoutResults(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1832,7 +1814,7 @@ func (s *S) TestFindIterWithoutResults(c *C) {
 }
 
 func (s *S) TestFindIterLimit(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1884,7 +1866,7 @@ func (s *S) TestResumeIter(c *C) {
 	}
 	const numDocuments = 10
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	session.SetBatch(4)
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -1946,7 +1928,7 @@ func (s *S) TestFindIterCursorTimeout(c *C) {
 	if !*cursorTimeout {
 		c.Skip("-cursor-timeout")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -1988,7 +1970,7 @@ func (s *S) TestFindIterCursorNoTimeout(c *C) {
 	if !*cursorTimeout {
 		c.Skip("-cursor-timeout")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2039,7 +2021,7 @@ func (s *S) TestTooManyItemsLimitBug(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(runtime.NumCPU()))
@@ -2075,7 +2057,7 @@ func (s *S) TestBatchSizeZeroGetMore(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(runtime.NumCPU()))
@@ -2121,7 +2103,7 @@ func (s *S) TestFindIterLimitWithMore(c *C) {
 	if s.versionAtLeast(3, 4) {
 		c.Skip("fail on 3.4+")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2184,7 +2166,7 @@ func (s *S) TestFindIterLimitWithMore(c *C) {
 }
 
 func (s *S) TestFindIterLimitWithBatch(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2243,7 +2225,7 @@ func (s *S) TestFindIterLimitWithBatch(c *C) {
 }
 
 func (s *S) TestFindIterSortWithBatch(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2310,7 +2292,7 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2404,7 +2386,7 @@ func (s *S) TestFindTailTimeoutWithSleep(c *C) {
 // Test tailable cursors in a situation where Next never gets to sleep once
 // to respect the timeout requested on Tail.
 func (s *S) TestFindTailTimeoutNoSleep(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2489,7 +2471,7 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2574,7 +2556,7 @@ func (s *S) TestFindTailNoTimeout(c *C) {
 }
 
 func (s *S) TestIterNextResetsResult(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2644,7 +2626,7 @@ func (s *S) TestIterNextResetsResult(c *C) {
 }
 
 func (s *S) TestFindForOnIter(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2696,7 +2678,7 @@ func (s *S) TestFindForOnIter(c *C) {
 }
 
 func (s *S) TestFindFor(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2748,7 +2730,7 @@ func (s *S) TestFindFor(c *C) {
 }
 
 func (s *S) TestFindForStopOnError(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2775,7 +2757,7 @@ func (s *S) TestFindForStopOnError(c *C) {
 }
 
 func (s *S) TestFindForResetsResult(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2845,11 +2827,8 @@ func (s *S) TestFindForResetsResult(c *C) {
 }
 
 func (s *S) TestFindIterSnapshot(c *C) {
-	if s.versionAtLeast(3, 2) {
-		c.Skip("Broken in 3.2: https://jira.mongodb.org/browse/SERVER-21403")
-	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2893,7 +2872,7 @@ func (s *S) TestFindIterSnapshot(c *C) {
 }
 
 func (s *S) TestSort(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2928,7 +2907,7 @@ func (s *S) TestSort(c *C) {
 }
 
 func (s *S) TestSortWithBadArgs(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -2944,7 +2923,7 @@ func (s *S) TestSortWithBadArgs(c *C) {
 }
 
 func (s *S) TestSortScoreText(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3004,7 +2983,7 @@ func (s *S) TestSortScoreText(c *C) {
 }
 
 func (s *S) TestPrefetching(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3093,7 +3072,8 @@ func (s *S) TestPrefetching(c *C) {
 }
 
 func (s *S) TestSafeSetting(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3206,7 +3186,7 @@ func (s *S) TestSafeSetting(c *C) {
 }
 
 func (s *S) TestSafeInsert(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3221,16 +3201,16 @@ func (s *S) TestSafeInsert(c *C) {
 	// Session should be safe by default, so inserting it again must fail.
 	err = coll.Insert(M{"_id": 1})
 	c.Assert(err, ErrorMatches, ".*E11000 duplicate.*")
-	c.Assert(err.(*mgo.LastError).Code, Equals, 11000)
+	if lerr, ok := err.(*mgo.LastError); ok {
+		c.Assert(lerr.Code, Equals, 11000)
+	} else {
+		c.Assert(err.(*mgo.QueryError).Code, Equals, 11000)
+	}
 
-	// It must have sent two operations (INSERT_OP + getLastError QUERY_OP)
+	// It must have sent one operation
 	stats := mgo.GetStats()
 
-	if s.versionAtLeast(2, 6) {
-		c.Assert(stats.SentOps, Equals, 1)
-	} else {
-		c.Assert(stats.SentOps, Equals, 2)
-	}
+	c.Assert(stats.SentOps, Equals, 1)
 
 	mgo.ResetStats()
 
@@ -3245,7 +3225,8 @@ func (s *S) TestSafeInsert(c *C) {
 }
 
 func (s *S) TestSafeParameters(c *C) {
-	session, err := mgo.Dial("localhost:40011")
+
+	session, err := mgo.Dial("localhost:40011" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3262,7 +3243,7 @@ func (s *S) TestSafeParameters(c *C) {
 }
 
 func (s *S) TestQueryErrorOne(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3282,7 +3263,7 @@ func (s *S) TestQueryErrorOne(c *C) {
 }
 
 func (s *S) TestQueryErrorNext(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3486,7 +3467,7 @@ func getIndex34(session *mgo.Session, db, collection, name string) M {
 }
 
 func (s *S) TestEnsureIndex(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3528,7 +3509,7 @@ func (s *S) TestEnsureIndex(c *C) {
 		// 		db.runCommand({"listIndexes": <collectionName>})
 		//
 		// and iterate over the returned cursor.
-		if s.versionAtLeast(3, 4) {
+		if s.versionAtLeast(3, 2, 17) {
 			c.Assert(getIndex34(session, "mydb", "mycoll", test.expected["name"].(string)), DeepEquals, test.expected)
 		} else {
 			idxs := session.DB("mydb").C("system.indexes")
@@ -3590,7 +3571,7 @@ func (s *S) TestEnsureIndex(c *C) {
 }
 
 func (s *S) TestEnsureIndexWithBadInfo(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3604,7 +3585,7 @@ func (s *S) TestEnsureIndexWithBadInfo(c *C) {
 }
 
 func (s *S) TestEnsureIndexWithUnsafeSession(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3629,7 +3610,7 @@ func (s *S) TestEnsureIndexWithUnsafeSession(c *C) {
 }
 
 func (s *S) TestEnsureIndexKey(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3638,7 +3619,7 @@ func (s *S) TestEnsureIndexKey(c *C) {
 	err = coll.EnsureIndexKey("a")
 	c.Assert(err, IsNil)
 
-	if s.versionAtLeast(3, 4) {
+	if s.versionAtLeast(3, 2, 17) {
 		expected := M{
 			"name": "a_1",
 			"key":  M{"a": 1},
@@ -3688,7 +3669,7 @@ func (s *S) TestEnsureIndexKey(c *C) {
 }
 
 func (s *S) TestEnsureIndexDropIndex(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3703,7 +3684,7 @@ func (s *S) TestEnsureIndexDropIndex(c *C) {
 	err = coll.DropIndex("-b")
 	c.Assert(err, IsNil)
 
-	if s.versionAtLeast(3, 4) {
+	if s.versionAtLeast(3, 2, 17) {
 		// system.indexes is deprecated since 3.0, use
 		// db.runCommand({"listIndexes": <collectionName>})
 		// instead
@@ -3744,7 +3725,7 @@ func (s *S) TestEnsureIndexDropIndex(c *C) {
 }
 
 func (s *S) TestEnsureIndexDropIndexName(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3758,7 +3739,7 @@ func (s *S) TestEnsureIndexDropIndexName(c *C) {
 
 	err = coll.DropIndexName("a")
 	c.Assert(err, IsNil)
-	if s.versionAtLeast(3, 4) {
+	if s.versionAtLeast(3, 2, 17) {
 		// system.indexes is deprecated since 3.0, use
 		// db.runCommand({"listIndexes": <collectionName>})
 		// instead
@@ -3799,7 +3780,7 @@ func (s *S) TestEnsureIndexDropIndexName(c *C) {
 }
 
 func (s *S) TestEnsureIndexDropAllIndexes(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3814,7 +3795,7 @@ func (s *S) TestEnsureIndexDropAllIndexes(c *C) {
 	err = coll.DropAllIndexes()
 	c.Assert(err, IsNil)
 
-	if s.versionAtLeast(3, 4) {
+	if s.versionAtLeast(3, 2, 17) {
 		// system.indexes is deprecated since 3.0, use
 		// db.runCommand({"listIndexes": <collectionName>})
 		// instead
@@ -3832,7 +3813,7 @@ func (s *S) TestEnsureIndexDropAllIndexes(c *C) {
 }
 
 func (s *S) TestEnsureIndexCaching(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3873,7 +3854,7 @@ func (s *S) TestEnsureIndexCaching(c *C) {
 }
 
 func (s *S) TestEnsureIndexGetIndexes(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3910,7 +3891,7 @@ func (s *S) TestEnsureIndexGetIndexes(c *C) {
 }
 
 func (s *S) TestEnsureIndexNameCaching(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3954,7 +3935,7 @@ func (s *S) TestEnsureIndexNameCaching(c *C) {
 }
 
 func (s *S) TestEnsureIndexEvalGetIndexes(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -3991,7 +3972,7 @@ func (s *S) TestEnsureIndexEvalGetIndexes(c *C) {
 var testTTL = flag.Bool("test-ttl", false, "test TTL collections (may take 1 minute)")
 
 func (s *S) TestEnsureIndexExpireAfter(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4039,7 +4020,7 @@ func (s *S) TestEnsureIndexExpireAfter(c *C) {
 }
 
 func (s *S) TestDistinct(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4057,7 +4038,7 @@ func (s *S) TestDistinct(c *C) {
 }
 
 func (s *S) TestMapReduce(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4092,7 +4073,7 @@ func (s *S) TestMapReduce(c *C) {
 }
 
 func (s *S) TestMapReduceFinalize(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4123,7 +4104,7 @@ func (s *S) TestMapReduceFinalize(c *C) {
 }
 
 func (s *S) TestMapReduceToCollection(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4163,7 +4144,7 @@ func (s *S) TestMapReduceToCollection(c *C) {
 }
 
 func (s *S) TestMapReduceToOtherDb(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4203,7 +4184,7 @@ func (s *S) TestMapReduceToOtherDb(c *C) {
 }
 
 func (s *S) TestMapReduceOutOfOrder(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4226,7 +4207,7 @@ func (s *S) TestMapReduceOutOfOrder(c *C) {
 }
 
 func (s *S) TestMapReduceScope(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4248,7 +4229,7 @@ func (s *S) TestMapReduceScope(c *C) {
 }
 
 func (s *S) TestMapReduceVerbose(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4271,7 +4252,7 @@ func (s *S) TestMapReduceVerbose(c *C) {
 }
 
 func (s *S) TestMapReduceLimit(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4293,7 +4274,7 @@ func (s *S) TestMapReduceLimit(c *C) {
 }
 
 func (s *S) TestBuildInfo(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4334,7 +4315,7 @@ func (s *S) TestBuildInfo(c *C) {
 }
 
 func (s *S) TestZeroTimeRoundtrip(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4352,7 +4333,7 @@ func (s *S) TestZeroTimeRoundtrip(c *C) {
 }
 
 func (s *S) TestFsyncLock(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4380,7 +4361,7 @@ func (s *S) TestFsyncLock(c *C) {
 }
 
 func (s *S) TestFsync(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4395,11 +4376,11 @@ func (s *S) TestRepairCursor(c *C) {
 	if !s.versionAtLeast(2, 7) {
 		c.Skip("RepairCursor only works on 2.7+")
 	}
-	if s.versionAtLeast(3, 4) {
-		c.Skip("fail on 3.4+")
+	if s.versionAtLeast(3, 2, 17) {
+		c.Skip("fail on 3.2.17+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 	session.SetBatch(2)
@@ -4446,7 +4427,7 @@ func (s *S) TestPipeIter(c *C) {
 		c.Skip("Pipe only works on 2.1+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4482,7 +4463,7 @@ func (s *S) TestPipeAll(c *C) {
 		c.Skip("Pipe only works on 2.1+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4507,7 +4488,7 @@ func (s *S) TestPipeOne(c *C) {
 		c.Skip("Pipe only works on 2.1+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4532,7 +4513,7 @@ func (s *S) TestPipeExplain(c *C) {
 		c.Skip("Pipe only works on 2.1+")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4549,7 +4530,7 @@ func (s *S) TestPipeExplain(c *C) {
 }
 
 func (s *S) TestBatch1Bug(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4572,7 +4553,7 @@ func (s *S) TestBatch1Bug(c *C) {
 }
 
 func (s *S) TestInterfaceIterBug(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4595,7 +4576,7 @@ func (s *S) TestInterfaceIterBug(c *C) {
 }
 
 func (s *S) TestFindIterCloseKillsCursor(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4616,7 +4597,7 @@ func (s *S) TestFindIterCloseKillsCursor(c *C) {
 }
 
 func (s *S) TestFindIterDoneWithBatches(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4645,7 +4626,7 @@ func (s *S) TestFindIterDoneWithBatches(c *C) {
 }
 
 func (s *S) TestFindIterDoneErr(c *C) {
-	session, err := mgo.Dial("localhost:40002")
+	session, err := mgo.Dial("localhost:40002" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4660,7 +4641,7 @@ func (s *S) TestFindIterDoneErr(c *C) {
 }
 
 func (s *S) TestFindIterDoneNotFound(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4674,7 +4655,7 @@ func (s *S) TestFindIterDoneNotFound(c *C) {
 }
 
 func (s *S) TestLogReplay(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4695,7 +4676,7 @@ func (s *S) TestLogReplay(c *C) {
 }
 
 func (s *S) TestSetCursorTimeout(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4715,7 +4696,7 @@ func (s *S) TestSetCursorTimeout(c *C) {
 }
 
 func (s *S) TestNewIterNoServer(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4737,7 +4718,7 @@ func (s *S) TestNewIterNoServer(c *C) {
 }
 
 func (s *S) TestNewIterNoServerPresetErr(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4762,7 +4743,7 @@ func (s *S) TestBypassValidation(c *C) {
 	if !s.versionAtLeast(3, 2) {
 		c.Skip("validation supported on 3.2+")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4832,7 +4813,7 @@ func (s *S) TestCollationQueries(c *C) {
 	if !s.versionAtLeast(3, 3, 12) {
 		c.Skip("collations being released with 3.4")
 	}
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4874,7 +4855,7 @@ func (s *S) TestCollationQueries(c *C) {
 // Some benchmarks that require a running database.
 
 func (s *S) BenchmarkFindIterRaw(c *C) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	c.Assert(err, IsNil)
 	defer session.Close()
 
@@ -4906,7 +4887,7 @@ func (s *S) BenchmarkFindIterRaw(c *C) {
 }
 
 func BenchmarkInsertSingle(b *testing.B) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -4926,7 +4907,7 @@ func BenchmarkInsertSingle(b *testing.B) {
 }
 
 func BenchmarkInsertMultiple(b *testing.B) {
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("localhost:40001" + expFeaturesString)
 	if err != nil {
 		b.Fatal(err)
 	}
