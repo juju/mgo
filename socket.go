@@ -321,8 +321,8 @@ func (socket *mongoSocket) Release() {
 		server := socket.server
 		closeAfterIdle := socket.closeAfterIdle
 		socket.Unlock()
-		socket.LogoutAll()
 		if closeAfterIdle {
+			socket.LogoutAll()
 			socket.Close()
 		} else if server != nil {
 			// If the socket is dead server is nil.
