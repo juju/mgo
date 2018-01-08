@@ -65,7 +65,7 @@ func ExampleGeospatial_Near() {
 	}
 
 	// Connect to mongo
-	session, err := Dial("localhost:27017")
+	session, err := Dial("localhost:40001")
 	if err != nil {
 		panic(err)
 	}
