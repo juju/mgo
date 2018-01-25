@@ -27,7 +27,7 @@
 package mgo_test
 
 import (
-	mgo "github.com/globalsign/mgo"
+	mgo "github.com/juju/mgo"
 	. "gopkg.in/check.v1"
 )
 

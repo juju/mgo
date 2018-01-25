@@ -3,7 +3,7 @@ package mgo
 import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"github.com/globalsign/mgo/bson"
+	"github.com/juju/mgo/bson"
 	. "gopkg.in/check.v1"
 	"testing"
 )

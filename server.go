@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/globalsign/mgo/bson"
+	"github.com/juju/mgo/bson"
 )
 
 // ---------------------------------------------------------------------------
