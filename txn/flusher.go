@@ -274,7 +274,7 @@ NextDoc:
 				// txn-queue is too long, abort this transaction. abortOrReload will pull the tokens from
 				// all of the docs that we've touched so far.
 				revno[dkey] = info.Revno
-				f.queue[dkey] = info.Queue
+				f.queue[dkey] = tokensWithIds(info.Queue)
 				revnos := assembledRevnos(t.Ops, revno)
 				pull := map[bson.ObjectId]*transaction{t.Id: t}
 				err := f.abortOrReload(t, revnos, pull)
