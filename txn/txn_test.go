@@ -861,7 +861,6 @@ func (s *S) TestPurgeMissingPipelineSizeLimit(c *C) {
 var flaky = flag.Bool("flaky", false, "Include flaky tests")
 var txnQueueLength = flag.Int("qlength", 100, "txn-queue length for tests")
 
-
 func (s *S) TestTxnQueueStressTest(c *C) {
 	// This fails about 20% of the time on Mongo 3.2 (I haven't tried
 	// other versions) with account balance being 3999 instead of
@@ -1047,4 +1046,3 @@ func (s *S) TestTxnQueuePreparing(c *C) {
 	}
 	c.Check(len(qdoc.Queue), Equals, expectedCount)
 }
-
