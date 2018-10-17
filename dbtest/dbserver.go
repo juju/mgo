@@ -115,7 +115,12 @@ func (dbs *DBServer) Stop() {
 		select {
 		case <-dbs.tomb.Dead():
 		case <-time.After(5 * time.Second):
-			panic("timeout waiting for mongod process to die")
+			dbs.server.Process.Signal(os.Kill)
+			select {
+			case <-dbs.tomb.Dead():
+			case <-time.After(5 * time.Second):
+				panic("timeout waiting for mongod process to die")
+			}
 		}
 		dbs.server = nil
 	}
