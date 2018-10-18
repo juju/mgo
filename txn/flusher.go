@@ -895,6 +895,10 @@ func (f *flusher) apply(t *transaction, pull map[bson.ObjectId]*transaction) err
 			}
 		case op.Assert != nil:
 			// Pure assertion. No changes to apply.
+			if f.opts.AssertionCleanupLength > 0 && len(pullAll) >= f.opts.AssertionCleanupLength {
+				chaos("")
+				err = c.Update(qdoc, bson.D{{"$pullAll", bson.D{{"txn-queue", pullAll}}}})
+			}
 		}
 		if err == nil {
 			outcome = "DONE"

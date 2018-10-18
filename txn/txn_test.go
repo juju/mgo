@@ -777,6 +777,97 @@ func (s *S) TestTxnQueueUnlimited(c *C) {
 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, 1101)
 }
 
+func (s *S) TestTxnQueueAssertionsDefault(c *C) {
+	opts := txn.DefaultRunnerOptions()
+	// We force the MaxTxnQueueLength to be shorter, so we don't have to do
+	// as many iterations to get it to fail.
+	// Without any default pruning, the queue on the assert-only document
+	// will grow longer than this length, and that will cause transactions
+	// to stop being applied.
+	opts.MaxTxnQueueLength = 500
+	s.runner.SetOptions(opts)
+	// By default we should prevent a txn-queue from growing too large
+	txn.SetDebug(false)
+	c.Assert(s.accounts.Insert(M{"_id": 0, "balance": 100}), IsNil)
+	c.Assert(s.accounts.Insert(M{"_id": 1, "balance": 100}), IsNil)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: M{"balance": 100},
+	}, {
+		C:      "accounts",
+		Id:     1,
+		Update: M{"$inc": M{"balance": 1}},
+	}}
+	for i := 0; i < 600; i++ {
+		c.Assert(s.runner.Run(ops, "", nil), IsNil)
+	}
+	var a0 txnQueue
+	c.Assert(s.accounts.FindId(0).One(&a0), IsNil)
+	var a1 txnQueue
+	c.Assert(s.accounts.FindId(1).One(&a1), IsNil)
+	c.Check(len(a0.Queue) < 500, Equals, true,
+		Commentf("txn-queue grew too long: len=%d", len(a0.Queue)))
+	c.Check(len(a1.Queue) < 500, Equals, true,
+		Commentf("txn-queue grew too long: len=%d", len(a1.Queue)))
+}
+
+func (s *S) TestTxnQueueAssertionsCustomValue(c *C) {
+	opts := txn.DefaultRunnerOptions()
+	opts.AssertionCleanupLength = 17
+	s.runner.SetOptions(opts)
+	// By default we should prevent a txn-queue from growing too large
+	txn.SetDebug(false)
+	c.Assert(s.accounts.Insert(M{"_id": 0, "balance": 100}), IsNil)
+	c.Assert(s.accounts.Insert(M{"_id": 1, "balance": 100}), IsNil)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: M{"balance": 100},
+	}, {
+		C:      "accounts",
+		Id:     1,
+		Update: M{"$inc": M{"balance": 1}},
+	}}
+	for i := 0; i < 100; i++ {
+		c.Assert(s.runner.Run(ops, "", nil), IsNil)
+	}
+	var a0 txnQueue
+	c.Assert(s.accounts.FindId(0).One(&a0), IsNil)
+	var a1 txnQueue
+	c.Assert(s.accounts.FindId(1).One(&a1), IsNil)
+	c.Check(len(a0.Queue) <= 17, Equals, true,
+		Commentf("txn-queue grew too long: len=%d", len(a0.Queue)))
+	c.Check(len(a1.Queue) <= 17, Equals, true,
+		Commentf("txn-queue grew too long: len=%d", len(a1.Queue)))
+}
+
+func (s *S) TestTxnQueueAssertionsDisabled(c *C) {
+	opts := txn.DefaultRunnerOptions()
+	opts.AssertionCleanupLength = 0
+	s.runner.SetOptions(opts)
+	// By default we should prevent a txn-queue from growing too large
+	txn.SetDebug(false)
+	c.Assert(s.accounts.Insert(M{"_id": 0, "balance": 100}), IsNil)
+	c.Assert(s.accounts.Insert(M{"_id": 1, "balance": 100}), IsNil)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: M{"balance": 100},
+	}, {
+		C:      "accounts",
+		Id:     1,
+		Update: M{"$inc": M{"balance": 1}},
+	}}
+	for i := 0; i < 200; i++ {
+		c.Assert(s.runner.Run(ops, "", nil), IsNil)
+	}
+	var a0 txnQueue
+	c.Assert(s.accounts.FindId(0).One(&a0), IsNil)
+	c.Check(len(a0.Queue), Equals, 200,
+		Commentf("queue length did not match expected %d: actual: %d", 200, len(a0.Queue)))
+}
+
 func (s *S) TestPurgeMissingPipelineSizeLimit(c *C) {
 	// This test ensures that PurgeMissing can handle very large
 	// txn-queue fields. Previous iterations of PurgeMissing would
