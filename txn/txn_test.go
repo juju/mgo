@@ -18,6 +18,8 @@ func TestAll(t *testing.T) {
 	TestingT(t)
 }
 
+var fast = flag.Bool("fast", false, "Skip slow tests")
+
 type S struct {
 	server   dbtest.DBServer
 	session  *mgo.Session
@@ -578,6 +580,9 @@ func (s *S) TestPurgeMissing(c *C) {
 }
 
 func (s *S) TestTxnQueueStashStressTest(c *C) {
+	if *fast {
+		c.Skip("-fast was supplied and this test is slow")
+	}
 	txn.SetChaos(txn.Chaos{
 		SlowdownChance: 0.3,
 		Slowdown:       50 * time.Millisecond,
@@ -1031,6 +1036,11 @@ type txnQueue struct {
 
 func (s *S) TestTxnQueueAssertionGrowth(c *C) {
 	txn.SetDebug(false) // too much spam
+	opts := txn.DefaultRunnerOptions()
+	// Disable automatic cleanup of queue, so that we can see the queue
+	// properly cleared on update.
+	opts.AssertionCleanupLength = 0
+	s.runner.SetOptions(opts)
 	err := s.accounts.Insert(M{"_id": 0, "balance": 0})
 	c.Assert(err, IsNil)
 	// Create many assertion only transactions.
@@ -1136,4 +1146,33 @@ func (s *S) TestTxnQueuePreparing(c *C) {
 		expectedCount = *txnQueueLength - 1
 	}
 	c.Check(len(qdoc.Queue), Equals, expectedCount)
+}
+
+func (s *S) TestTxnQueueAddAndRemove(c *C) {
+	opts := txn.DefaultRunnerOptions()
+	opts.MaxTxnQueueLength = 10
+	s.runner.SetOptions(opts)
+	opInsert := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Insert: M{"balance": 0},
+	}}
+	opRemove := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Remove: true,
+	}}
+	err := s.runner.Run(opInsert, "", nil)
+	c.Assert(err, IsNil)
+	for n := 0; n < 10; n++ {
+		err = s.runner.Run(opRemove, "", nil)
+		c.Assert(err, IsNil)
+		err = s.runner.Run(opInsert, "", nil)
+		c.Assert(err, IsNil)
+	}
+	var qdoc txnQueue
+	err = s.accounts.FindId(0).One(&qdoc)
+	c.Assert(err, IsNil)
+	// Both Remove and Insert should prune all the completed transactions
+	c.Check(len(qdoc.Queue), Equals, 1)
 }
