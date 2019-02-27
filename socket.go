@@ -150,6 +150,7 @@ type insertOp struct {
 	collection string        // "database.collection"
 	documents  []interface{} // One or more documents to insert
 	flags      uint32
+	txn        *transaction
 }
 
 type updateOp struct {

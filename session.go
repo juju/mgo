@@ -75,22 +75,41 @@ const (
 // multiple goroutines will cause them to share the same underlying socket.
 // See the documentation on Session.SetMode for more details.
 type Session struct {
-	m                sync.RWMutex
-	cluster_         *mongoCluster
-	slaveSocket      *mongoSocket
-	masterSocket     *mongoSocket
-	slaveOk          bool
-	consistency      Mode
-	queryConfig      query
-	safeOp           *queryOp
-	syncTimeout      time.Duration
-	sockTimeout      time.Duration
-	defaultdb        string
-	sourcedb         string
-	dialCred         *Credential
-	creds            []Credential
-	poolLimit        int
-	bypassValidation bool
+	m                     sync.RWMutex
+	cluster_              *mongoCluster
+	slaveSocket           *mongoSocket
+	masterSocket          *mongoSocket
+	slaveOk               bool
+	consistency           Mode
+	queryConfig           query
+	safeOp                *queryOp
+	syncTimeout           time.Duration
+	sockTimeout           time.Duration
+	defaultdb             string
+	sourcedb              string
+	dialCred              *Credential
+	creds                 []Credential
+	poolLimit             int
+	bypassValidation      bool
+	sessionId             bson.Binary
+	nextTransactionNumber int64
+	transaction           *transaction
+}
+
+type sessionId struct {
+	Id bson.Binary `bson:"id"`
+}
+
+type sessionInfo struct {
+	Id             sessionId `bson:"id"`
+	TimeoutMinutes int       `bson:"timeoutMinutes"`
+}
+
+type transaction struct {
+	number   int64
+	lsid     bson.Binary
+	started  bool
+	finished bool
 }
 
 type Database struct {
@@ -2434,7 +2453,8 @@ func IsDup(err error) bool {
 // happens while inserting the provided documents, the returned error will
 // be of type *LastError.
 func (c *Collection) Insert(docs ...interface{}) error {
-	_, err := c.writeOp(&insertOp{c.FullName, docs, 0}, true)
+	txn := c.Database.Session.transaction
+	_, err := c.writeOp(&insertOp{c.FullName, docs, 0, txn}, true)
 	return err
 }
 
@@ -4742,8 +4762,21 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 		cmd = bson.D{
 			{"insert", c.Name},
 			{"documents", op.documents},
-			{"writeConcern", writeConcern},
 			{"ordered", op.flags&1 == 0},
+		}
+		if op.txn != nil {
+			if op.txn.finished {
+				//TODO ERROR
+			}
+			if !op.txn.started {
+				cmd = append(cmd, bson.DocElem{Name: "startTransaction", Value: true})
+				op.txn.started = true
+			}
+			cmd = append(cmd, bson.DocElem{Name: "autocommit", Value: false})
+			cmd = append(cmd, bson.DocElem{Name: "txnNumber", Value: op.txn.number})
+			cmd = append(cmd, bson.DocElem{Name: "lsid", Value: bson.M{"id": op.txn.lsid}})
+		} else {
+			cmd = append(cmd, bson.DocElem{"writeConcern", writeConcern})
 		}
 	case *updateOp:
 		// http://docs.mongodb.org/manual/reference/command/update
@@ -4822,4 +4855,65 @@ func hasErrMsg(d []byte) bool {
 		}
 	}
 	return false
+}
+
+func (s *Session) ensureSessionId() error {
+	if len(s.sessionId.Data) != 0 {
+		return nil
+	}
+	var info sessionInfo
+	// TODO(jam): 2019-02-27 the startSession call can take a few optional parameters.
+	//  We could put them as Session attributes that we pass along. It seems to be
+	//  things like 'casual consistency' and 'write preference', which we seem to be
+	//  setting elsewhere.
+
+	err := s.Run("startSession", &info)
+	if err != nil {
+		return err
+	}
+	s.sessionId = info.Id.Id
+	return nil
+}
+
+func (s *Session) StartTransaction() error {
+	if err := s.ensureSessionId(); err != nil {
+		return err
+	}
+	if s.transaction != nil {
+		return errors.New("transaction already started")
+	}
+	s.transaction = &transaction{
+		number:  s.nextTransactionNumber,
+		lsid:    s.sessionId,
+		started: false,
+	}
+	s.nextTransactionNumber++
+	// TODO: readConcern, writeConcern, readPreference can all be set separately for a given transaction
+	return nil
+}
+
+func (s *Session) CommitTransaction() error {
+	if len(s.sessionId.Data) == 0 {
+		// error, shouldn't commit if we never called s.ensureSessionId
+		return nil
+	}
+	if s.transaction == nil {
+		// error, no active transaction
+		return nil
+	}
+	cmd := bson.D{
+		{Name: "commitTransaction", Value: 1},
+		{Name: "txnNumber", Value: s.transaction.number},
+		{Name: "autocommit", Value: false},
+		{Name: "lsid", Value: bson.M{"id": s.sessionId}},
+	}
+	err := s.Run(cmd, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Session) AbortTransaction() error {
+	return nil
 }

@@ -1345,8 +1345,8 @@ func (s *S) TestQueryComment(c *C) {
 		commentField = "command.comment"
 		nField = "command.filter.n"
 	} else if s.versionAtLeast(3, 2) {
-			commentField = "query.comment"
-			nField = "query.filter.n"
+		commentField = "query.comment"
+		nField = "query.filter.n"
 	}
 	n, err := session.DB("mydb").C("system.profile").Find(bson.M{nField: 41, commentField: "some comment"}).Count()
 	c.Assert(err, IsNil)
@@ -4297,6 +4297,66 @@ func (s *S) TestVersionAtLeast(c *C) {
 		bi = mgo.BuildInfo{VersionArray: pair[1]}
 		c.Assert(bi.VersionAtLeast(pair[0]...), Equals, false)
 	}
+}
+
+func (s *S) TestTransactionVisibility(c *C) {
+	if !s.versionAtLeast(4, 0) {
+		c.Skip("transactions not supported before 4.0")
+	}
+	session1, err := mgo.Dial("localhost:40011")
+	c.Assert(err, IsNil)
+	defer session1.Close()
+	coll1 := session1.DB("mydb").C("mycoll")
+	err = coll1.Create(&mgo.CollectionInfo{})
+	c.Assert(err, IsNil)
+	// Collections must be created outside of a transaction
+	session2 := session1.Copy()
+	defer session2.Close()
+	err = session1.StartTransaction()
+	c.Assert(err, IsNil)
+	err = coll1.Insert(bson.M{"a": "a", "b": "b"})
+	c.Assert(err, IsNil)
+	// Since the change was made in a transaction, session 2 should not see the document
+	coll2 := session2.DB("mydb").C("mycoll")
+	var res bson.M
+	err = coll2.Find(bson.M{"a": "a"}).One(&res)
+	c.Check(err, Equals, mgo.ErrNotFound)
+	err = session1.CommitTransaction()
+	c.Assert(err, IsNil)
+	// Now that it is committed, session2 should see it
+	err = coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res)
+	c.Check(err, IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
+
+}
+
+func (s *S) TestAbortTransactionVisibility(c *C) {
+	if !s.versionAtLeast(4, 0) {
+		c.Skip("transactions not supported before 4.0")
+	}
+	session1, err := mgo.Dial("localhost:40011")
+	c.Assert(err, IsNil)
+	defer session1.Close()
+	session2 := session1.Copy()
+	defer session2.Close()
+	err = session1.StartTransaction()
+	c.Assert(err, IsNil)
+	coll1 := session1.DB("mydb").C("mycoll")
+	err = coll1.Insert(bson.M{"a": "a", "b": "b"})
+	c.Assert(err, IsNil)
+	// Since the change was made in a transaction, session 2 should not see the document
+	coll2 := session2.DB("mydb").C("mycoll")
+	var res bson.M
+	err = coll2.Find(bson.M{"a": "a"}).One(&res)
+	c.Check(err, Equals, mgo.ErrNotFound)
+	err = session1.AbortTransaction()
+	c.Assert(err, IsNil)
+	// Since it is Aborted, nobody should see the object
+	err = coll2.Find(bson.M{"a": "a"}).One(&res)
+	c.Check(err, Equals, mgo.ErrNotFound)
+	err = coll1.Find(bson.M{"a": "a"}).One(&res)
+	c.Check(err, Equals, mgo.ErrNotFound)
+
 }
 
 // --------------------------------------------------------------------------
