@@ -163,7 +163,7 @@ func (s *S) TestInsertFindOneNil(c *C) {
 
 	coll := session.DB("mydb").C("mycoll")
 	err = coll.Find(nil).One(nil)
-	c.Assert(err, ErrorMatches, "unauthorized.*|not authorized.*")
+	c.Assert(err, ErrorMatches, failedAuthRegex)
 }
 
 func (s *S) TestInsertFindOneMap(c *C) {
@@ -1105,10 +1105,12 @@ func (s *S) TestFindAndModifyBug997828(c *C) {
 	_, err = coll.Find(M{"n": "not-a-number"}).Apply(mgo.Change{Update: M{"$inc": M{"n": 1}}}, result)
 	c.Assert(err, ErrorMatches, `(exception: )?Cannot apply \$inc .*`)
 	if s.versionAtLeast(2, 1) {
+		// Oh, the dance of error codes. :-(
 		qerr, _ := err.(*mgo.QueryError)
 		c.Assert(qerr, NotNil, Commentf("err: %#v", err))
-		if s.versionAtLeast(2, 6) {
-			// Oh, the dance of error codes. :-(
+		if s.versionAtLeast(3, 6) {
+			c.Assert(qerr.Code, Equals, 14)
+		} else if s.versionAtLeast(2, 6) {
 			c.Assert(qerr.Code, Equals, 16837)
 		} else {
 			c.Assert(qerr.Code, Equals, 10140)
@@ -1318,7 +1320,7 @@ func (s *S) TestQueryComment(c *C) {
 	db := session.DB("mydb")
 	coll := db.C("mycoll")
 
-	err = db.Run(bson.M{"profile": 2}, nil)
+	err = db.Run(bson.D{{Name: "profile", Value: 2}}, nil)
 	c.Assert(err, IsNil)
 
 	ns := []int{40, 41, 42}
@@ -1339,13 +1341,19 @@ func (s *S) TestQueryComment(c *C) {
 
 	commentField := "query.$comment"
 	nField := "query.$query.n"
-	if s.versionAtLeast(3, 2) {
-		commentField = "query.comment"
-		nField = "query.filter.n"
+	if s.versionAtLeast(3, 6) {
+		commentField = "command.comment"
+		nField = "command.filter.n"
+	} else if s.versionAtLeast(3, 2) {
+			commentField = "query.comment"
+			nField = "query.filter.n"
 	}
 	n, err := session.DB("mydb").C("system.profile").Find(bson.M{nField: 41, commentField: "some comment"}).Count()
 	c.Assert(err, IsNil)
 	c.Assert(n, Equals, 1)
+
+	err = db.Run(bson.D{{Name: "profile", Value: 0}}, nil)
+	c.Assert(err, IsNil)
 }
 
 func (s *S) TestFindOneNotFound(c *C) {
@@ -1674,6 +1682,9 @@ func serverCursorsOpen(session *mgo.Session) int {
 }
 
 func (s *S) TestFindIterLimitWithMore(c *C) {
+	if s.versionAtLeast(3, 4) {
+		c.Skip("fail on 3.4+")
+	}
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3863,6 +3874,9 @@ func (s *S) TestRepairCursor(c *C) {
 	if !s.versionAtLeast(2, 7) {
 		c.Skip("RepairCursor only works on 2.7+")
 	}
+	if s.versionAtLeast(3, 2, 17) {
+		c.Skip("no longer implemented in 3.2.17+")
+	}
 
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
@@ -4116,7 +4130,7 @@ func (s *S) TestFindIterDoneErr(c *C) {
 	ok := iter.Next(&result)
 	c.Assert(iter.Done(), Equals, true)
 	c.Assert(ok, Equals, false)
-	c.Assert(iter.Err(), ErrorMatches, "unauthorized.*|not authorized.*")
+	c.Assert(iter.Err(), ErrorMatches, failedAuthRegex)
 }
 
 func (s *S) TestFindIterDoneNotFound(c *C) {
