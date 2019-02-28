@@ -79,6 +79,7 @@ type queryOp struct {
 	options    queryWrapper
 	hasOptions bool
 	serverTags []bson.D
+	// txn        *transaction
 }
 
 type queryWrapper struct {
@@ -443,6 +444,16 @@ func (socket *mongoSocket) Query(ops ...interface{}) (err error) {
 					return err
 				}
 			}
+			// if op.txn != nil && op.txn.started && !op.txn.finished {
+			// 	buf, err = addBSON(buf, bson.DocElem{"lsid", op.txn.lsid})
+			// 	if err != nil {
+			// 		return err
+			// 	}
+			// 	buf, err = addBSON(buf, bson.DocElem{"txnNumber", op.txn.number})
+			// 	if err != nil {
+			// 		return err
+			// 	}
+			// }
 			replyFunc = op.replyFunc
 
 		case *getMoreOp:

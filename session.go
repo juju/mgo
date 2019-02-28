@@ -3577,6 +3577,7 @@ func (s *Session) prepareQuery(op *queryOp) {
 	if s.slaveOk {
 		op.flags |= flagSlaveOk
 	}
+	// op.txn = s.transaction
 	s.m.RUnlock()
 	return
 }
@@ -4882,12 +4883,12 @@ func (s *Session) StartTransaction() error {
 	if s.transaction != nil {
 		return errors.New("transaction already started")
 	}
+	s.nextTransactionNumber++
 	s.transaction = &transaction{
 		number:  s.nextTransactionNumber,
 		lsid:    s.sessionId,
 		started: false,
 	}
-	s.nextTransactionNumber++
 	// TODO: readConcern, writeConcern, readPreference can all be set separately for a given transaction
 	return nil
 }
