@@ -4892,22 +4892,34 @@ func (s *Session) StartTransaction() error {
 	return nil
 }
 
-func (s *Session) CommitTransaction() error {
-	if len(s.sessionId.Data) == 0 {
-		// error, shouldn't commit if we never called s.ensureSessionId
-		return nil
-	}
-	if s.transaction == nil {
-		// error, no active transaction
-		return nil
-	}
+func (s *Session) finishTransaction(command string) error {
 	cmd := bson.D{
-		{Name: "commitTransaction", Value: 1},
+		{Name: command, Value: 1},
 		{Name: "txnNumber", Value: s.transaction.number},
 		{Name: "autocommit", Value: false},
 		{Name: "lsid", Value: bson.M{"id": s.sessionId}},
 	}
-	err := s.Run(cmd, nil)
+	return s.Run(cmd, nil)
+}
+
+func (s *Session) CommitTransaction() error {
+	if len(s.sessionId.Data) == 0 {
+		// XXX: error?, shouldn't commit if we never called s.ensureSessionId
+		return nil
+	}
+	if s.transaction == nil || !s.transaction.started {
+		// XXX: error?, no active transaction
+		return nil
+	}
+	if s.transaction.finished {
+		// XXX: logic error, we shouldn't be able to get here
+		return nil
+	}
+	// XXX: Python has a retry tracking 'retryable' errors around finishTransaction
+	err := s.finishTransaction("commitTransaction")
+	// TODO(jam): 2019-02-28 do we need a mutex around this since Insert/Update/etc are potentially different goroutines?
+	s.transaction.finished = false
+	s.transaction = nil
 	if err != nil {
 		return err
 	}
@@ -4915,5 +4927,26 @@ func (s *Session) CommitTransaction() error {
 }
 
 func (s *Session) AbortTransaction() error {
+	if len(s.sessionId.Data) == 0 {
+		// XXX: error?, shouldn't commit if we never called s.ensureSessionId
+		return nil
+	}
+	if s.transaction == nil {
+		// XXX: error?, no active transaction
+		return nil
+	}
+	if !s.transaction.started {
+		// nothing to do
+		return nil
+	}
+	// XXX: do we want to track a transaction STATE, like they do in Python with states of:
+	// NONE, STARTING, IN_PROGRESS, ABORTED, COMMITTED, COMMITTED_EMPTY
+	err := s.finishTransaction("abortTransaction")
+	// TODO(jam): 2019-02-28 do we need a mutex around this since Insert/Update/etc are potentially different goroutines?
+	s.transaction.finished = false
+	s.transaction = nil
+	if err != nil {
+		return err
+	}
 	return nil
 }

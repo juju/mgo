@@ -4309,6 +4309,7 @@ func (s *S) TestTransactionVisibility(c *C) {
 	coll1 := session1.DB("mydb").C("mycoll")
 	err = coll1.Create(&mgo.CollectionInfo{})
 	c.Assert(err, IsNil)
+	defer coll1.DropCollection()
 	// Collections must be created outside of a transaction
 	session2 := session1.Copy()
 	defer session2.Close()
@@ -4316,9 +4317,11 @@ func (s *S) TestTransactionVisibility(c *C) {
 	c.Assert(err, IsNil)
 	err = coll1.Insert(bson.M{"a": "a", "b": "b"})
 	c.Assert(err, IsNil)
+	var res bson.M
+	err = coll1.Find(bson.M{"a": "a"}).One(&res)
+	c.Check(err, Equals, mgo.ErrNotFound)
 	// Since the change was made in a transaction, session 2 should not see the document
 	coll2 := session2.DB("mydb").C("mycoll")
-	var res bson.M
 	err = coll2.Find(bson.M{"a": "a"}).One(&res)
 	c.Check(err, Equals, mgo.ErrNotFound)
 	err = session1.CommitTransaction()
@@ -4327,7 +4330,6 @@ func (s *S) TestTransactionVisibility(c *C) {
 	err = coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res)
 	c.Check(err, IsNil)
 	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
-
 }
 
 func (s *S) TestAbortTransactionVisibility(c *C) {
@@ -4337,16 +4339,21 @@ func (s *S) TestAbortTransactionVisibility(c *C) {
 	session1, err := mgo.Dial("localhost:40011")
 	c.Assert(err, IsNil)
 	defer session1.Close()
+	coll1 := session1.DB("mydb").C("mycoll")
+	err = coll1.Create(&mgo.CollectionInfo{})
+	c.Assert(err, IsNil)
+	defer coll1.DropCollection()
 	session2 := session1.Copy()
 	defer session2.Close()
 	err = session1.StartTransaction()
 	c.Assert(err, IsNil)
-	coll1 := session1.DB("mydb").C("mycoll")
 	err = coll1.Insert(bson.M{"a": "a", "b": "b"})
 	c.Assert(err, IsNil)
+	var res bson.M
+	err = coll1.Find(bson.M{"a": "a"}).One(&res)
+	c.Check(err, Equals, mgo.ErrNotFound)
 	// Since the change was made in a transaction, session 2 should not see the document
 	coll2 := session2.DB("mydb").C("mycoll")
-	var res bson.M
 	err = coll2.Find(bson.M{"a": "a"}).One(&res)
 	c.Check(err, Equals, mgo.ErrNotFound)
 	err = session1.AbortTransaction()
