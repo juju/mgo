@@ -4448,13 +4448,66 @@ func (s *S) TestTransactionUpsertCommitted(c *C) {
 	// Since the change was made in a transaction, session 2 should not see it
 	c.Assert(coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
 	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
-	c.Assert(coll2.Find(bson.M{"a": "2"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(coll2.Find(bson.M{"a": "2"}).One(&res), Equals, mgo.ErrNotFound)
 	c.Assert(session1.CommitTransaction(), IsNil)
 	// Now that it is committed, session2 should see it
 	c.Assert(coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
 	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "c"})
 	c.Assert(coll2.Find(bson.M{"a": "2"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
 	c.Check(res, DeepEquals, bson.M{"a": "2", "b": "c"})
+}
+
+func (s *S) TestTransactionRemoveCommitted(c *C) {
+	session1, coll1, session2, coll2 := s.setup2Sessions(c)
+	defer session1.Close()
+	defer session2.Close()
+	c.Assert(coll1.Insert(bson.M{"a": "a", "b": "b"}), IsNil)
+	c.Assert(session1.StartTransaction(), IsNil)
+	// call Abort in case there is a problem, but ignore an error if it was committed,
+	// otherwise the server will block in DropCollection because the transaction is active.
+	defer session1.AbortTransaction()
+	c.Assert(coll1.Remove(bson.M{"a": "a"}), IsNil)
+	// Should be gone in the session that has the transaction
+	var res bson.M
+	c.Assert(coll1.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+	// Since the change was made in a transaction, session 2 should still see the document
+	c.Assert(coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
+	c.Assert(session1.CommitTransaction(), IsNil)
+	// Now that it is committed, it should be gone
+	c.Assert(coll1.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(coll2.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+}
+
+func (s *S) TestTransactionRemoveAllCommitted(c *C) {
+	session1, coll1, session2, coll2 := s.setup2Sessions(c)
+	defer session1.Close()
+	defer session2.Close()
+	c.Assert(coll1.Insert(bson.M{"a": "a", "b": "b"}), IsNil)
+	c.Assert(coll1.Insert(bson.M{"a": "2", "b": "b"}), IsNil)
+	c.Assert(session1.StartTransaction(), IsNil)
+	// call Abort in case there is a problem, but ignore an error if it was committed,
+	// otherwise the server will block in DropCollection because the transaction is active.
+	defer session1.AbortTransaction()
+	changeInfo, err := coll1.RemoveAll(bson.M{"a": bson.M{"$exists": true}})
+	c.Assert(err, IsNil)
+	c.Check(changeInfo.Matched, Equals, 2)
+	c.Check(changeInfo.Removed, Equals, 2)
+	// Should be gone in the session that has the transaction
+	var res bson.M
+	c.Assert(coll1.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(coll1.Find(bson.M{"a": "2"}).One(&res), Equals, mgo.ErrNotFound)
+	// Since the change was made in a transaction, session 2 should still see the document
+	c.Assert(coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
+	c.Assert(coll2.Find(bson.M{"a": "2"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "2", "b": "b"})
+	c.Assert(session1.CommitTransaction(), IsNil)
+	// Now that it is committed, it should be gone
+	c.Assert(coll1.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(coll1.Find(bson.M{"a": "2"}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(coll2.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(coll2.Find(bson.M{"a": "2"}).One(&res), Equals, mgo.ErrNotFound)
 }
 
 // --------------------------------------------------------------------------

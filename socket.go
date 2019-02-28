@@ -79,7 +79,6 @@ type queryOp struct {
 	options    queryWrapper
 	hasOptions bool
 	serverTags []bson.D
-	txn        *transaction
 }
 
 type queryWrapper struct {
@@ -151,7 +150,6 @@ type insertOp struct {
 	collection string        // "database.collection"
 	documents  []interface{} // One or more documents to insert
 	flags      uint32
-	txn        *transaction
 }
 
 type updateOp struct {
@@ -161,7 +159,6 @@ type updateOp struct {
 	Flags      uint32      `bson:"-"`
 	Multi      bool        `bson:"multi,omitempty"`
 	Upsert     bool        `bson:"upsert,omitempty"`
-	txn        *transaction
 }
 
 type deleteOp struct {
@@ -169,7 +166,6 @@ type deleteOp struct {
 	Selector   interface{} `bson:"q"`
 	Flags      uint32      `bson:"-"`
 	Limit      int         `bson:"limit"`
-	txn        *transaction
 }
 
 type killCursorsOp struct {

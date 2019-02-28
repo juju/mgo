@@ -2453,8 +2453,7 @@ func IsDup(err error) bool {
 // happens while inserting the provided documents, the returned error will
 // be of type *LastError.
 func (c *Collection) Insert(docs ...interface{}) error {
-	txn := c.Database.Session.transaction
-	_, err := c.writeOp(&insertOp{c.FullName, docs, 0, txn}, true)
+	_, err := c.writeOp(&insertOp{c.FullName, docs, 0}, true)
 	return err
 }
 
@@ -2477,7 +2476,6 @@ func (c *Collection) Update(selector interface{}, update interface{}) error {
 		Collection: c.FullName,
 		Selector:   selector,
 		Update:     update,
-		txn:        c.Database.Session.transaction,
 	}
 	lerr, err := c.writeOp(&op, true)
 	if err == nil && lerr != nil && !lerr.UpdatedExisting {
@@ -2528,7 +2526,6 @@ func (c *Collection) UpdateAll(selector interface{}, update interface{}) (info *
 		Update:     update,
 		Flags:      2,
 		Multi:      true,
-		txn:        c.Database.Session.transaction,
 	}
 	lerr, err := c.writeOp(&op, true)
 	if err == nil && lerr != nil {
@@ -2560,7 +2557,6 @@ func (c *Collection) Upsert(selector interface{}, update interface{}) (info *Cha
 		Update:     update,
 		Flags:      1,
 		Upsert:     true,
-		txn:        c.Database.Session.transaction,
 	}
 	var lerr *LastError
 	for i := 0; i < maxUpsertRetries; i++ {
@@ -2606,7 +2602,7 @@ func (c *Collection) Remove(selector interface{}) error {
 	if selector == nil {
 		selector = bson.D{}
 	}
-	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 1, 1, nil}, true)
+	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 1, 1}, true)
 	if err == nil && lerr != nil && lerr.N == 0 {
 		return ErrNotFound
 	}
@@ -2635,7 +2631,7 @@ func (c *Collection) RemoveAll(selector interface{}) (info *ChangeInfo, err erro
 	if selector == nil {
 		selector = bson.D{}
 	}
-	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 0, 0, nil}, true)
+	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 0, 0}, true)
 	if err == nil && lerr != nil {
 		info = &ChangeInfo{Removed: lerr.N, Matched: lerr.N}
 	}
@@ -3104,6 +3100,7 @@ Error:
 func (q *Query) One(result interface{}) (err error) {
 	q.m.Lock()
 	session := q.session
+	txn := session.transaction
 	op := q.op // Copy.
 	q.m.Unlock()
 
@@ -3117,7 +3114,7 @@ func (q *Query) One(result interface{}) (err error) {
 
 	session.prepareQuery(&op)
 
-	expectFindReply := prepareFindOp(socket, &op, 1)
+	expectFindReply := prepareFindOp(socket, &op, 1, txn)
 
 	data, err := socket.SimpleQuery(&op)
 	if err != nil {
@@ -3161,7 +3158,7 @@ func (q *Query) One(result interface{}) (err error) {
 // a new-style find command if that's supported by the MongoDB server (3.2+).
 // It returns whether to expect a find command result or not. Note op may be
 // translated into an explain command, in which case the function returns false.
-func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32) bool {
+func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32, txn *transaction) bool {
 	if socket.ServerInfo().MaxWireVersion < 4 || op.collection == "admin.$cmd" {
 		return false
 	}
@@ -3192,16 +3189,16 @@ func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32) bool {
 		find.BatchSize = op.limit
 	}
 
-	if op.txn != nil {
-		if op.txn.finished {
+	if txn != nil {
+		if txn.finished {
 			// ???
 		}
-		if !op.txn.started {
-			op.txn.started = true
+		if !txn.started {
+			txn.started = true
 			find.StartTransaction = true
 		}
-		find.TXNNumber = op.txn.number
-		find.LSID = bson.D{{Name: "id", Value: op.txn.sessionId}}
+		find.TXNNumber = txn.number
+		find.LSID = bson.D{{Name: "id", Value: txn.sessionId}}
 		autocommit := false
 		find.Autocommit = &autocommit
 	}
@@ -3467,6 +3464,7 @@ func (s *Session) DatabaseNames() (names []string, err error) {
 func (q *Query) Iter() *Iter {
 	q.m.Lock()
 	session := q.session
+	txn := session.transaction
 	op := q.op
 	prefetch := q.prefetch
 	limit := q.limit
@@ -3494,7 +3492,7 @@ func (q *Query) Iter() *Iter {
 	session.prepareQuery(&op)
 	op.replyFunc = iter.op.replyFunc
 
-	if prepareFindOp(socket, &op, limit) {
+	if prepareFindOp(socket, &op, limit, txn) {
 		iter.findCmd = true
 	}
 
@@ -3598,7 +3596,6 @@ func (s *Session) prepareQuery(op *queryOp) {
 	if s.slaveOk {
 		op.flags |= flagSlaveOk
 	}
-	op.txn = s.transaction
 	s.m.RUnlock()
 	return
 }
@@ -4778,7 +4775,7 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 	}
 
 	var cmd bson.D
-	var txn *transaction
+	txn := c.Database.Session.transaction
 	switch op := op.(type) {
 	case *insertOp:
 		// http://docs.mongodb.org/manual/reference/command/insert
@@ -4787,7 +4784,6 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 			{"documents", op.documents},
 			{"ordered", op.flags&1 == 0},
 		}
-		txn = op.txn
 	case *updateOp:
 		// http://docs.mongodb.org/manual/reference/command/update
 		cmd = bson.D{
@@ -4795,7 +4791,6 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 			{"updates", []interface{}{op}},
 			{"ordered", ordered},
 		}
-		txn = op.txn
 	case bulkUpdateOp:
 		// http://docs.mongodb.org/manual/reference/command/update
 		cmd = bson.D{
