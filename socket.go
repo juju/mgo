@@ -79,7 +79,7 @@ type queryOp struct {
 	options    queryWrapper
 	hasOptions bool
 	serverTags []bson.D
-	// txn        *transaction
+	txn        *transaction
 }
 
 type queryWrapper struct {
@@ -161,6 +161,7 @@ type updateOp struct {
 	Flags      uint32      `bson:"-"`
 	Multi      bool        `bson:"multi,omitempty"`
 	Upsert     bool        `bson:"upsert,omitempty"`
+	txn        *transaction
 }
 
 type deleteOp struct {
@@ -168,6 +169,7 @@ type deleteOp struct {
 	Selector   interface{} `bson:"q"`
 	Flags      uint32      `bson:"-"`
 	Limit      int         `bson:"limit"`
+	txn        *transaction
 }
 
 type killCursorsOp struct {
@@ -444,16 +446,6 @@ func (socket *mongoSocket) Query(ops ...interface{}) (err error) {
 					return err
 				}
 			}
-			// if op.txn != nil && op.txn.started && !op.txn.finished {
-			// 	buf, err = addBSON(buf, bson.DocElem{"lsid", op.txn.lsid})
-			// 	if err != nil {
-			// 		return err
-			// 	}
-			// 	buf, err = addBSON(buf, bson.DocElem{"txnNumber", op.txn.number})
-			// 	if err != nil {
-			// 		return err
-			// 	}
-			// }
 			replyFunc = op.replyFunc
 
 		case *getMoreOp:

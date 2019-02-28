@@ -106,10 +106,10 @@ type sessionInfo struct {
 }
 
 type transaction struct {
-	number   int64
-	lsid     bson.Binary
-	started  bool
-	finished bool
+	number    int64
+	sessionId bson.Binary
+	started   bool
+	finished  bool
 }
 
 type Database struct {
@@ -2477,6 +2477,7 @@ func (c *Collection) Update(selector interface{}, update interface{}) error {
 		Collection: c.FullName,
 		Selector:   selector,
 		Update:     update,
+		txn:        c.Database.Session.transaction,
 	}
 	lerr, err := c.writeOp(&op, true)
 	if err == nil && lerr != nil && !lerr.UpdatedExisting {
@@ -2527,6 +2528,7 @@ func (c *Collection) UpdateAll(selector interface{}, update interface{}) (info *
 		Update:     update,
 		Flags:      2,
 		Multi:      true,
+		// txn:        c.Database.Session.transaction,
 	}
 	lerr, err := c.writeOp(&op, true)
 	if err == nil && lerr != nil {
@@ -2558,6 +2560,7 @@ func (c *Collection) Upsert(selector interface{}, update interface{}) (info *Cha
 		Update:     update,
 		Flags:      1,
 		Upsert:     true,
+		// txn:        c.Database.Session.transaction,
 	}
 	var lerr *LastError
 	for i := 0; i < maxUpsertRetries; i++ {
@@ -2603,7 +2606,7 @@ func (c *Collection) Remove(selector interface{}) error {
 	if selector == nil {
 		selector = bson.D{}
 	}
-	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 1, 1}, true)
+	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 1, 1, nil}, true)
 	if err == nil && lerr != nil && lerr.N == 0 {
 		return ErrNotFound
 	}
@@ -2632,7 +2635,7 @@ func (c *Collection) RemoveAll(selector interface{}) (info *ChangeInfo, err erro
 	if selector == nil {
 		selector = bson.D{}
 	}
-	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 0, 0}, true)
+	lerr, err := c.writeOp(&deleteOp{c.FullName, selector, 0, 0, nil}, true)
 	if err == nil && lerr != nil {
 		info = &ChangeInfo{Removed: lerr.N, Matched: lerr.N}
 	}
@@ -3189,6 +3192,20 @@ func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32) bool {
 		find.BatchSize = op.limit
 	}
 
+	if op.txn != nil {
+		if op.txn.finished {
+			// ???
+		}
+		if !op.txn.started {
+			op.txn.started = true
+			find.StartTransaction = true
+		}
+		find.TXNNumber = op.txn.number
+		find.LSID = bson.D{{Name: "id", Value: op.txn.sessionId}}
+		autocommit := false
+		find.Autocommit = &autocommit
+	}
+
 	explain := op.options.Explain
 
 	op.collection = op.collection[:nameDot] + ".$cmd"
@@ -3242,6 +3259,10 @@ type findCmd struct {
 	OplogReplay         bool        `bson:"oplogReplay,omitempty"`
 	NoCursorTimeout     bool        `bson:"noCursorTimeout,omitempty"`
 	AllowPartialResults bool        `bson:"allowPartialResults,omitempty"`
+	LSID                bson.D      `bson:"lsid,omitempty"`
+	TXNNumber           int64       `bson:"txnNumber,omitempty"`
+	Autocommit          *bool       `bson:"autocommit,omitempty"`
+	StartTransaction    bool        `bson:"startTransaction,omitempty"`
 }
 
 // getMoreCmd holds the command used for requesting more query results on MongoDB 3.2+.
@@ -3577,7 +3598,7 @@ func (s *Session) prepareQuery(op *queryOp) {
 	if s.slaveOk {
 		op.flags |= flagSlaveOk
 	}
-	// op.txn = s.transaction
+	op.txn = s.transaction
 	s.m.RUnlock()
 	return
 }
@@ -4757,6 +4778,7 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 	}
 
 	var cmd bson.D
+	var txn *transaction
 	switch op := op.(type) {
 	case *insertOp:
 		// http://docs.mongodb.org/manual/reference/command/insert
@@ -4765,34 +4787,20 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 			{"documents", op.documents},
 			{"ordered", op.flags&1 == 0},
 		}
-		if op.txn != nil {
-			if op.txn.finished {
-				//TODO ERROR
-			}
-			if !op.txn.started {
-				cmd = append(cmd, bson.DocElem{Name: "startTransaction", Value: true})
-				op.txn.started = true
-			}
-			cmd = append(cmd, bson.DocElem{Name: "autocommit", Value: false})
-			cmd = append(cmd, bson.DocElem{Name: "txnNumber", Value: op.txn.number})
-			cmd = append(cmd, bson.DocElem{Name: "lsid", Value: bson.M{"id": op.txn.lsid}})
-		} else {
-			cmd = append(cmd, bson.DocElem{"writeConcern", writeConcern})
-		}
+		txn = op.txn
 	case *updateOp:
 		// http://docs.mongodb.org/manual/reference/command/update
 		cmd = bson.D{
 			{"update", c.Name},
 			{"updates", []interface{}{op}},
-			{"writeConcern", writeConcern},
 			{"ordered", ordered},
 		}
+		txn = op.txn
 	case bulkUpdateOp:
 		// http://docs.mongodb.org/manual/reference/command/update
 		cmd = bson.D{
 			{"update", c.Name},
 			{"updates", op},
-			{"writeConcern", writeConcern},
 			{"ordered", ordered},
 		}
 	case *deleteOp:
@@ -4800,7 +4808,6 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 		cmd = bson.D{
 			{"delete", c.Name},
 			{"deletes", []interface{}{op}},
-			{"writeConcern", writeConcern},
 			{"ordered", ordered},
 		}
 	case bulkDeleteOp:
@@ -4808,12 +4815,25 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 		cmd = bson.D{
 			{"delete", c.Name},
 			{"deletes", op},
-			{"writeConcern", writeConcern},
 			{"ordered", ordered},
 		}
 	}
 	if bypassValidation {
 		cmd = append(cmd, bson.DocElem{"bypassDocumentValidation", true})
+	}
+	if txn != nil {
+		if txn.finished {
+			//TODO ERROR
+		}
+		if !txn.started {
+			cmd = append(cmd, bson.DocElem{Name: "startTransaction", Value: true})
+			txn.started = true
+		}
+		cmd = append(cmd, bson.DocElem{Name: "autocommit", Value: false})
+		cmd = append(cmd, bson.DocElem{Name: "txnNumber", Value: txn.number})
+		cmd = append(cmd, bson.DocElem{Name: "lsid", Value: bson.M{"id": txn.sessionId}})
+	} else {
+		cmd = append(cmd, bson.DocElem{"writeConcern", writeConcern})
 	}
 
 	var result writeCmdResult
@@ -4885,9 +4905,9 @@ func (s *Session) StartTransaction() error {
 	}
 	s.nextTransactionNumber++
 	s.transaction = &transaction{
-		number:  s.nextTransactionNumber,
-		lsid:    s.sessionId,
-		started: false,
+		number:    s.nextTransactionNumber,
+		sessionId: s.sessionId,
+		started:   false,
 	}
 	// TODO: readConcern, writeConcern, readPreference can all be set separately for a given transaction
 	return nil
