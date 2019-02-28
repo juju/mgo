@@ -2528,7 +2528,7 @@ func (c *Collection) UpdateAll(selector interface{}, update interface{}) (info *
 		Update:     update,
 		Flags:      2,
 		Multi:      true,
-		// txn:        c.Database.Session.transaction,
+		txn:        c.Database.Session.transaction,
 	}
 	lerr, err := c.writeOp(&op, true)
 	if err == nil && lerr != nil {
@@ -2560,7 +2560,7 @@ func (c *Collection) Upsert(selector interface{}, update interface{}) (info *Cha
 		Update:     update,
 		Flags:      1,
 		Upsert:     true,
-		// txn:        c.Database.Session.transaction,
+		txn:        c.Database.Session.transaction,
 	}
 	var lerr *LastError
 	for i := 0; i < maxUpsertRetries; i++ {
