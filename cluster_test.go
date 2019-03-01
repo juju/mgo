@@ -2065,6 +2065,11 @@ func (s *S) TestDoNotFallbackToMonotonic(c *C) {
 	if !s.versionAtLeast(3, 0) {
 		c.Skip("command-counting logic depends on 3.0+")
 	}
+	// accessing system.indexes is no longer correct in 3.2.17+ you must
+	// use listIndexes, so the test doesn't apply anymore.
+	if s.versionAtLeast(3, 2, 17) {
+		c.Skip("failing on 3.2.17+")
+	}
 
 	session, err := mgo.Dial("localhost:40012")
 	c.Assert(err, IsNil)
