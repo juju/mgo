@@ -27,7 +27,9 @@
 package mgo_test
 
 import (
+	"math/rand"
 	"sync"
+	"time"
 
 	. "gopkg.in/check.v1"
 	"gopkg.in/mgo.v2"
@@ -385,4 +387,95 @@ func (s *S) TestCloseWithOpenTransaction(c *C) {
 	// Close should abort the current session, which aborts the active transaction
 	session1.Close()
 	c.Assert(coll2.Find(bson.M{"a": "2"}).One(&res), Equals, mgo.ErrNotFound)
+}
+
+func (s *S) TestMultithreadedTransactionStartAbortAllActions(c *C) {
+	session := s.setupTxnSession(c)
+	defer session.Close()
+	coll := session.DB("mydb").C("mycoll")
+	c.Assert(coll.Create(&mgo.CollectionInfo{}), IsNil)
+	// It isn't particularly sane to have one thread starting and aborting transactions
+	// while other goroutines make modifications, but we want to be -race safe.
+	c.Assert(coll.Insert(bson.M{"a": "a", "b": "b"}), IsNil)
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(1)
+	// Start and Abort the transaction every millisecond
+	go func() {
+		defer wg.Done()
+		started := false
+		for {
+			select {
+			case <-stop:
+				if started {
+					session.AbortTransaction()
+					started = false
+				}
+				return
+			case <-time.After(1 * time.Millisecond):
+				if started {
+					session.AbortTransaction()
+					started = false
+				} else {
+					session.StartTransaction()
+					started = true
+				}
+			}
+		}
+	}()
+	doInsert := func() {
+		err := coll.Insert(bson.M{"a": "alt", "b": "something"})
+		if err != nil {
+			c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
+		}
+	}
+	doUpsert := func() {
+		_, err := coll.Upsert(bson.M{"a": "upserted"}, bson.M{"$inc": bson.M{"b": 1}})
+		if err != nil {
+			c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
+		}
+	}
+	doRemove := func() {
+		err := coll.Remove(bson.M{"a": "a"})
+		if err != nil {
+			if err != mgo.ErrNotFound {
+				c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
+			}
+		}
+	}
+	doFind := func() {
+		var res bson.M
+		err := coll.Find(bson.M{"a": "a"}).One(&res)
+		if err == nil {
+			c.Check(res["b"], Equals, "b")
+		} else if err != mgo.ErrNotFound {
+			c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
+		}
+	}
+	funcs := []func(){
+		doInsert,
+		doUpsert,
+		doRemove,
+		doFind,
+	}
+	// do Insert/Update/Remove/Find concurrently with starting & aborting the transaction
+	for _, tFunc := range funcs {
+		wg.Add(1)
+		go func(f func()) {
+			for {
+				nextSleep := time.Duration(rand.Int63n(int64(time.Millisecond)))
+				select {
+				case <-stop:
+					wg.Done()
+					return
+				case <-time.After(nextSleep):
+					f()
+				}
+			}
+		}(tFunc)
+	}
+	// Let those run for a bit
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

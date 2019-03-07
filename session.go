@@ -1644,6 +1644,7 @@ func (s *Session) Close() {
 		s.unsetSocket()
 		s.cluster_.Release()
 		s.cluster_ = nil
+		s.transaction = nil
 	}
 	s.m.Unlock()
 }
@@ -3110,9 +3111,12 @@ Error:
 func (q *Query) One(result interface{}) (err error) {
 	q.m.Lock()
 	session := q.session
-	txn := session.transaction
 	op := q.op // Copy.
 	q.m.Unlock()
+	session.m.RLock()
+	txn := session.transaction
+	startTxn := txn != nil && !txn.started
+	session.m.RUnlock()
 
 	socket, err := session.acquireSocket(true)
 	if err != nil {
@@ -3124,11 +3128,16 @@ func (q *Query) One(result interface{}) (err error) {
 
 	session.prepareQuery(&op)
 
-	expectFindReply := prepareFindOp(socket, &op, 1, txn)
+	expectFindReply := prepareFindOp(socket, &op, 1, txn, startTxn)
 
 	data, err := socket.SimpleQuery(&op)
 	if err != nil {
 		return err
+	}
+	if startTxn {
+		session.m.Lock()
+		txn.started = true
+		session.m.Unlock()
 	}
 	if data == nil {
 		return ErrNotFound
@@ -3168,7 +3177,7 @@ func (q *Query) One(result interface{}) (err error) {
 // a new-style find command if that's supported by the MongoDB server (3.2+).
 // It returns whether to expect a find command result or not. Note op may be
 // translated into an explain command, in which case the function returns false.
-func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32, txn *transaction) bool {
+func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32, txn *transaction, startTxn bool) bool {
 	if socket.ServerInfo().MaxWireVersion < 4 || op.collection == "admin.$cmd" {
 		return false
 	}
@@ -3200,11 +3209,8 @@ func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32, txn *transacti
 	}
 
 	if txn != nil {
-		if txn.finished {
-			// ???
-		}
-		if !txn.started {
-			txn.started = true
+		if startTxn {
+			find.StartTransaction = true
 		}
 		find.TXNNumber = txn.number
 		find.LSID = bson.D{{Name: "id", Value: txn.sessionId}}
@@ -3268,6 +3274,7 @@ type findCmd struct {
 	LSID                bson.D      `bson:"lsid,omitempty"`
 	TXNNumber           int64       `bson:"txnNumber,omitempty"`
 	Autocommit          *bool       `bson:"autocommit,omitempty"`
+	StartTransaction    bool        `bson:"startTransaction,omitempty"`
 }
 
 // getMoreCmd holds the command used for requesting more query results on MongoDB 3.2+.
@@ -3472,11 +3479,14 @@ func (s *Session) DatabaseNames() (names []string, err error) {
 func (q *Query) Iter() *Iter {
 	q.m.Lock()
 	session := q.session
-	txn := session.transaction
 	op := q.op
 	prefetch := q.prefetch
 	limit := q.limit
 	q.m.Unlock()
+	session.m.RLock()
+	txn := session.transaction
+	startTxn := txn != nil && !txn.started
+	session.m.RUnlock()
 
 	iter := &Iter{
 		session:  session,
@@ -3500,7 +3510,7 @@ func (q *Query) Iter() *Iter {
 	session.prepareQuery(&op)
 	op.replyFunc = iter.op.replyFunc
 
-	if prepareFindOp(socket, &op, limit, txn) {
+	if prepareFindOp(socket, &op, limit, txn, startTxn) {
 		iter.findCmd = true
 	}
 
@@ -3511,6 +3521,11 @@ func (q *Query) Iter() *Iter {
 		iter.m.Lock()
 		iter.err = err
 		iter.m.Unlock()
+	}
+	if startTxn {
+		session.m.Lock()
+		txn.started = true
+		session.m.Unlock()
 	}
 
 	return iter
@@ -4656,6 +4671,7 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 	s.m.RLock()
 	safeOp := s.safeOp
 	bypassValidation := s.bypassValidation
+	txn := s.transaction
 	s.m.RUnlock()
 
 	if socket.ServerInfo().MaxWireVersion >= 2 {
@@ -4671,7 +4687,7 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 					l = len(all)
 				}
 				op.documents = all[i:l]
-				oplerr, err := c.writeOpCommand(socket, safeOp, op, ordered, bypassValidation)
+				oplerr, err := c.writeOpCommand(socket, safeOp, op, ordered, bypassValidation, txn)
 				lerr.N += oplerr.N
 				lerr.modified += oplerr.modified
 				if err != nil {
@@ -4689,7 +4705,7 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 			}
 			return &lerr, nil
 		}
-		return c.writeOpCommand(socket, safeOp, op, ordered, bypassValidation)
+		return c.writeOpCommand(socket, safeOp, op, ordered, bypassValidation, txn)
 	} else if updateOps, ok := op.(bulkUpdateOp); ok {
 		var lerr LastError
 		for i, updateOp := range updateOps {
@@ -4774,7 +4790,7 @@ func (c *Collection) writeOpQuery(socket *mongoSocket, safeOp *queryOp, op inter
 	return result, nil
 }
 
-func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op interface{}, ordered, bypassValidation bool) (lerr *LastError, err error) {
+func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op interface{}, ordered, bypassValidation bool, txn *transaction) (lerr *LastError, err error) {
 	var writeConcern interface{}
 	if safeOp == nil {
 		writeConcern = bson.D{{"w", 0}}
@@ -4783,7 +4799,6 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 	}
 
 	var cmd bson.D
-	txn := c.Database.Session.transaction
 	switch op := op.(type) {
 	case *insertOp:
 		// http://docs.mongodb.org/manual/reference/command/insert
@@ -4824,13 +4839,14 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 	if bypassValidation {
 		cmd = append(cmd, bson.DocElem{"bypassDocumentValidation", true})
 	}
+	started := false
 	if txn != nil {
 		if txn.finished {
 			//TODO ERROR
 		}
 		if !txn.started {
 			cmd = append(cmd, bson.DocElem{Name: "startTransaction", Value: true})
-			txn.started = true
+			started = true
 		}
 		cmd = append(cmd, bson.DocElem{Name: "autocommit", Value: false})
 		cmd = append(cmd, bson.DocElem{Name: "txnNumber", Value: txn.number})
@@ -4839,6 +4855,11 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 		cmd = append(cmd, bson.DocElem{"writeConcern", writeConcern})
 	}
 
+	if started {
+		c.Database.Session.m.Lock()
+		txn.started = started
+		c.Database.Session.m.Unlock()
+	}
 	var result writeCmdResult
 	err = c.Database.run(socket, cmd, &result)
 	debugf("Write command result: %#v (err=%v)", result, err)
