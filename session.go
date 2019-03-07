@@ -1628,6 +1628,16 @@ func (s *Session) Clone() *Session {
 // Close terminates the session.  It's a runtime error to use a session
 // after it has been closed.
 func (s *Session) Close() {
+	s.m.RLock()
+	txnActive := s.transaction != nil && s.transaction.started
+	s.m.RUnlock()
+	if txnActive {
+		// No chance to give the user an error
+		err := s.AbortTransaction()
+		if err != nil {
+			logf("abort during Session.Close failed: %v", err)
+		}
+	}
 	s.m.Lock()
 	if s.cluster_ != nil {
 		debugf("Closing session %p", s)
@@ -3195,7 +3205,6 @@ func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32, txn *transacti
 		}
 		if !txn.started {
 			txn.started = true
-			find.StartTransaction = true
 		}
 		find.TXNNumber = txn.number
 		find.LSID = bson.D{{Name: "id", Value: txn.sessionId}}
@@ -3259,7 +3268,6 @@ type findCmd struct {
 	LSID                bson.D      `bson:"lsid,omitempty"`
 	TXNNumber           int64       `bson:"txnNumber,omitempty"`
 	Autocommit          *bool       `bson:"autocommit,omitempty"`
-	StartTransaction    bool        `bson:"startTransaction,omitempty"`
 }
 
 // getMoreCmd holds the command used for requesting more query results on MongoDB 3.2+.
@@ -4874,9 +4882,12 @@ func hasErrMsg(d []byte) bool {
 }
 
 func (s *Session) ensureSessionId() error {
+	s.m.RLock()
 	if len(s.sessionId.Data) != 0 {
+		s.m.RUnlock()
 		return nil
 	}
+	s.m.RUnlock()
 	var info sessionInfo
 	// TODO(jam): 2019-02-27 the startSession call can take a few optional parameters.
 	//  We could put them as Session attributes that we pass along. It seems to be
@@ -4887,7 +4898,9 @@ func (s *Session) ensureSessionId() error {
 	if err != nil {
 		return err
 	}
+	s.m.Lock()
 	s.sessionId = info.Id.Id
+	s.m.Unlock()
 	return nil
 }
 
@@ -4895,7 +4908,9 @@ func (s *Session) StartTransaction() error {
 	if err := s.ensureSessionId(); err != nil {
 		return err
 	}
+	s.m.Lock()
 	if s.transaction != nil {
+		s.m.Unlock()
 		return errors.New("transaction already started")
 	}
 	s.nextTransactionNumber++
@@ -4904,65 +4919,62 @@ func (s *Session) StartTransaction() error {
 		sessionId: s.sessionId,
 		started:   false,
 	}
+	s.m.Unlock()
 	// TODO: readConcern, writeConcern, readPreference can all be set separately for a given transaction
 	return nil
 }
 
 func (s *Session) finishTransaction(command string) error {
-	cmd := bson.D{
-		{Name: command, Value: 1},
-		{Name: "txnNumber", Value: s.transaction.number},
-		{Name: "autocommit", Value: false},
-		{Name: "lsid", Value: bson.M{"id": s.sessionId}},
+	s.m.RLock()
+	if len(s.sessionId.Data) == 0 {
+		s.m.RUnlock()
+		return errors.New("no transaction in progress")
 	}
-	return s.Run(cmd, nil)
+	if s.transaction == nil {
+		s.m.RUnlock()
+		return errors.New("no transaction in progress")
+	}
+	txn := s.transaction
+	if txn.finished {
+		// XXX: logic error, we shouldn't be able to get here
+		s.m.RUnlock()
+		return nil
+	}
+	sessionId := s.sessionId
+	txnNumber := txn.number
+	started := txn.started
+	s.m.RUnlock()
+	var err error
+	if started {
+		// XXX: Python has a retry tracking 'retryable' errors around finishTransaction
+		cmd := bson.D{
+			{Name: command, Value: 1},
+			{Name: "txnNumber", Value: txnNumber},
+			{Name: "autocommit", Value: false},
+			{Name: "lsid", Value: bson.M{"id": sessionId}},
+		}
+		err = s.Run(cmd, nil)
+	}
+	s.m.Lock()
+	txn.finished = true
+	if s.transaction == txn {
+		s.transaction = nil
+	} else {
+		// TODO: How to exercise this code?
+		err = errors.New(fmt.Sprintf("transaction changed during %s, %v != %v",
+			command, txn, s.transaction))
+	}
+	s.m.Unlock()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Session) CommitTransaction() error {
-	if len(s.sessionId.Data) == 0 {
-		// XXX: error?, shouldn't commit if we never called s.ensureSessionId
-		return nil
-	}
-	if s.transaction == nil || !s.transaction.started {
-		// XXX: error?, no active transaction
-		return nil
-	}
-	if s.transaction.finished {
-		// XXX: logic error, we shouldn't be able to get here
-		return nil
-	}
-	// XXX: Python has a retry tracking 'retryable' errors around finishTransaction
-	err := s.finishTransaction("commitTransaction")
-	// TODO(jam): 2019-02-28 do we need a mutex around this since Insert/Update/etc are potentially different goroutines?
-	s.transaction.finished = false
-	s.transaction = nil
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.finishTransaction("commitTransaction")
 }
 
 func (s *Session) AbortTransaction() error {
-	if len(s.sessionId.Data) == 0 {
-		// XXX: error?, shouldn't commit if we never called s.ensureSessionId
-		return nil
-	}
-	if s.transaction == nil {
-		// XXX: error?, no active transaction
-		return nil
-	}
-	if !s.transaction.started {
-		// nothing to do
-		return nil
-	}
-	// XXX: do we want to track a transaction STATE, like they do in Python with states of:
-	// NONE, STARTING, IN_PROGRESS, ABORTED, COMMITTED, COMMITTED_EMPTY
-	err := s.finishTransaction("abortTransaction")
-	// TODO(jam): 2019-02-28 do we need a mutex around this since Insert/Update/etc are potentially different goroutines?
-	s.transaction.finished = false
-	s.transaction = nil
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.finishTransaction("abortTransaction")
 }
