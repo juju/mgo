@@ -28,6 +28,7 @@ package mgo_test
 
 import (
 	"math/rand"
+	"regexp"
 	"sync"
 	"time"
 
@@ -46,15 +47,20 @@ func (s *S) setupTxnSession(c *C) *mgo.Session {
 	return session
 }
 
-func (s *S) setup2Sessions(c *C) (*mgo.Session, *mgo.Collection, *mgo.Session, *mgo.Collection) {
-	session1 := s.setupTxnSession(c)
+func (s *S) setupTxnSessionAndCollection(c *C) (*mgo.Session, *mgo.Collection) {
+	session := s.setupTxnSession(c)
 	// Collections must be created outside of a transaction
-	coll1 := session1.DB("mydb").C("mycoll")
-	err := coll1.Create(&mgo.CollectionInfo{})
+	coll := session.DB("mydb").C("mycoll")
+	err := coll.Create(&mgo.CollectionInfo{})
 	if err != nil {
-		session1.Close()
+		session.Close()
 		c.Assert(err, IsNil)
 	}
+	return session, coll
+}
+
+func (s *S) setup2Sessions(c *C) (*mgo.Session, *mgo.Collection, *mgo.Session, *mgo.Collection) {
+	session1, coll1 := s.setupTxnSessionAndCollection(c)
 	session2 := session1.Copy()
 	coll2 := session2.DB("mydb").C("mycoll")
 	return session1, coll1, session2, coll2
@@ -338,21 +344,43 @@ func (s *S) TestCommitTransactionNoChanges(c *C) {
 }
 
 func (s *S) TestAbortTransactionTwice(c *C) {
-	session := s.setupTxnSession(c)
+	session, coll := s.setupTxnSessionAndCollection(c)
 	defer session.Close()
 	c.Assert(session.StartTransaction(), IsNil)
+	// The DB transaction isn't started until we make a change
+	c.Assert(coll.Insert(bson.M{"a": "a"}), IsNil)
 	c.Assert(session.AbortTransaction(), IsNil)
 	err := session.AbortTransaction()
 	c.Assert(err, ErrorMatches, "no transaction in progress")
 }
 
 func (s *S) TestCommitTransactionTwice(c *C) {
-	session := s.setupTxnSession(c)
+	session, coll := s.setupTxnSessionAndCollection(c)
 	defer session.Close()
 	c.Assert(session.StartTransaction(), IsNil)
+	// The DB transaction isn't started until we make a change
+	c.Assert(coll.Insert(bson.M{"a": "a"}), IsNil)
 	c.Assert(session.CommitTransaction(), IsNil)
 	err := session.CommitTransaction()
 	c.Assert(err, ErrorMatches, "no transaction in progress")
+}
+
+func (s *S) TestStartTransactionTwice(c *C) {
+	session, coll := s.setupTxnSessionAndCollection(c)
+	defer session.Close()
+	c.Assert(session.StartTransaction(), IsNil)
+	c.Assert(coll.Insert(bson.M{"a": "a"}), IsNil)
+	c.Assert(session.StartTransaction(), ErrorMatches, "transaction already started")
+	c.Assert(coll.Insert(bson.M{"b": "b"}), IsNil)
+	c.Assert(session.CommitTransaction(), IsNil)
+	// Calling StartTransaction a second time doesn't currently abort
+	// the txn in progress. Maybe we should as it is a sign that the driver
+	// is being used incorrectly?
+	var res bson.M
+	c.Assert(coll.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a"})
+	c.Assert(coll.Find(bson.M{"b": "b"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"b": "b"})
 }
 
 func (s *S) TestStartCommitAbortStartCommitTransaction(c *C) {
@@ -389,13 +417,51 @@ func (s *S) TestCloseWithOpenTransaction(c *C) {
 	c.Assert(coll2.Find(bson.M{"a": "2"}).One(&res), Equals, mgo.ErrNotFound)
 }
 
-func (s *S) TestMultithreadedTransactionStartAbortAllActions(c *C) {
-	session := s.setupTxnSession(c)
+func (s *S) TestRefreshDuringTransaction(c *C) {
+	session, coll := s.setupTxnSessionAndCollection(c)
 	defer session.Close()
-	coll := session.DB("mydb").C("mycoll")
-	c.Assert(coll.Create(&mgo.CollectionInfo{}), IsNil)
+	c.Assert(session.StartTransaction(), IsNil)
+	c.Assert(coll.Insert(bson.M{"a": "a", "b": "b"}), IsNil)
+	// Refresh closes the active connection, but as long as we preserve the
+	// SessionId and txnNumber, we should still be able to see the in-progress
+	// changes
+	session.Refresh()
+	var res bson.M
+	c.Assert(coll.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
+	c.Assert(session.CommitTransaction(), IsNil)
+	c.Assert(coll.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
+}
+
+func (s *S) TestCloneDifferentSessionTransaction(c *C) {
+	session1, coll1 := s.setupTxnSessionAndCollection(c)
+	defer session1.Close()
+	c.Assert(session1.StartTransaction(), IsNil)
+	c.Assert(coll1.Insert(bson.M{"a": "a", "b": "b"}), IsNil)
+	session2 := session1.Clone()
+	defer session2.Close()
+	coll2 := session2.DB("mydb").C("mycoll")
+	var res bson.M
+	c.Check(coll2.Find(bson.M{"a": "a"}).One(&res), Equals, mgo.ErrNotFound)
+	c.Assert(session2.StartTransaction(), IsNil)
+	c.Assert(coll2.Insert(bson.M{"a": "second", "b": "c"}), IsNil)
+	c.Check(coll1.Find(bson.M{"a": "second"}).One(&res), Equals, mgo.ErrNotFound)
+	session1.CommitTransaction()
+	session2.CommitTransaction()
+	c.Check(coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
+	c.Check(coll1.Find(bson.M{"a": "second"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
+	c.Check(res, DeepEquals, bson.M{"a": "second", "b": "c"})
+}
+
+func (s *S) TestMultithreadedTransactionStartAbortAllActions(c *C) {
+	session, coll := s.setupTxnSessionAndCollection(c)
+	defer session.Close()
 	// It isn't particularly sane to have one thread starting and aborting transactions
 	// while other goroutines make modifications, but we want to be -race safe.
+	// This doesn't assert that things are sequenced correctly, just that the driver
+	// won't break if it is abused.
 	c.Assert(coll.Insert(bson.M{"a": "a", "b": "b"}), IsNil)
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -423,33 +489,53 @@ func (s *S) TestMultithreadedTransactionStartAbortAllActions(c *C) {
 			}
 		}
 	}()
+	possibleErrors := []string{
+		"^Transaction .* has been aborted\\.$",
+		"^Given transaction number .* does not match any in-progress transactions\\.$",
+		"^Cannot specify 'startTransaction' on transaction .* since it is already in progress\\.$",
+		"^Cannot start transaction .* on session .* because a newer transaction .* has already started\\.",
+	}
+	timeoutRegex := "i/o timeout"
+	checkError := func(err error) {
+		if err == nil {
+			return
+		}
+		if err == mgo.ErrNotFound {
+			return
+		}
+		errStr := err.Error()
+		for _, errRegex := range possibleErrors {
+			matched, _ := regexp.MatchString(errRegex, errStr)
+			if matched {
+				return
+			}
+		}
+		if matched, _ := regexp.MatchString(timeoutRegex, errStr); matched {
+			// When we get i/o timeout, that means we have to reset the Session
+			session.Refresh()
+			return
+		}
+		c.Errorf("error did not match a known response: %v", err.Error())
+	}
 	doInsert := func() {
 		err := coll.Insert(bson.M{"a": "alt", "b": "something"})
-		if err != nil {
-			c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
-		}
+		checkError(err)
 	}
 	doUpsert := func() {
 		_, err := coll.Upsert(bson.M{"a": "upserted"}, bson.M{"$inc": bson.M{"b": 1}})
-		if err != nil {
-			c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
-		}
+		checkError(err)
 	}
 	doRemove := func() {
 		err := coll.Remove(bson.M{"a": "a"})
-		if err != nil {
-			if err != mgo.ErrNotFound {
-				c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
-			}
-		}
+		checkError(err)
 	}
 	doFind := func() {
 		var res bson.M
 		err := coll.Find(bson.M{"a": "a"}).One(&res)
 		if err == nil {
 			c.Check(res["b"], Equals, "b")
-		} else if err != mgo.ErrNotFound {
-			c.Check(err, ErrorMatches, "Transaction.*has been aborted\\.")
+		} else {
+			checkError(err)
 		}
 	}
 	funcs := []func(){

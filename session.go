@@ -109,7 +109,6 @@ type transaction struct {
 	number    int64
 	sessionId bson.Binary
 	started   bool
-	finished  bool
 }
 
 type Database struct {
@@ -573,6 +572,8 @@ func copySession(session *Session, keepCreds bool) (s *Session) {
 	}
 	scopy := *session
 	scopy.m = sync.RWMutex{}
+	scopy.transaction = nil
+	scopy.sessionId = bson.Binary{}
 	scopy.creds = creds
 	s = &scopy
 	debugf("New session %p on cluster %p (copy from %p)", s, cluster, session)
@@ -4841,13 +4842,12 @@ func (c *Collection) writeOpCommand(socket *mongoSocket, safeOp *queryOp, op int
 	}
 	started := false
 	if txn != nil {
-		if txn.finished {
-			//TODO ERROR
-		}
+		c.Database.Session.m.RLock()
 		if !txn.started {
 			cmd = append(cmd, bson.DocElem{Name: "startTransaction", Value: true})
 			started = true
 		}
+		c.Database.Session.m.RUnlock()
 		cmd = append(cmd, bson.DocElem{Name: "autocommit", Value: false})
 		cmd = append(cmd, bson.DocElem{Name: "txnNumber", Value: txn.number})
 		cmd = append(cmd, bson.DocElem{Name: "lsid", Value: bson.M{"id": txn.sessionId}})
@@ -4956,11 +4956,6 @@ func (s *Session) finishTransaction(command string) error {
 		return errors.New("no transaction in progress")
 	}
 	txn := s.transaction
-	if txn.finished {
-		// XXX: logic error, we shouldn't be able to get here
-		s.m.RUnlock()
-		return nil
-	}
 	sessionId := s.sessionId
 	txnNumber := txn.number
 	started := txn.started
@@ -4977,7 +4972,6 @@ func (s *Session) finishTransaction(command string) error {
 		err = s.Run(cmd, nil)
 	}
 	s.m.Lock()
-	txn.finished = true
 	if s.transaction == txn {
 		s.transaction = nil
 	} else {
