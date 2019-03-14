@@ -22,6 +22,16 @@ for (var i = 0; i != 60; i++) {
 		rs3a.auth("root", "rapadura")
 		db1 = new Mongo("127.0.0.1:40001").getDB("admin")
 		db2 = new Mongo("127.0.0.1:40002").getDB("admin")
+		s1 = new Mongo("127.0.0.1:40201").getDB("admin")
+		s2 = new Mongo("127.0.0.1:40202").getDB("admin")
+		s3 = new Mongo("127.0.0.1:40203").getDB("admin")
+		for (var i = 0; i < 10; i++) {
+			var ok = s3.auth("root", "rapadura")
+			if (ok) {
+				break
+			}
+			sleep(500)
+		}
 		break
 	} catch(err) {
 		print("Can't connect yet...")
@@ -45,7 +55,7 @@ function countHealthy(rs) {
         }
     }
     if (primary == 0) {
-	    count = 0
+        count = 0
     }
     return count
 }
