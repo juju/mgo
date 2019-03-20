@@ -5,9 +5,8 @@ package sstxn_test
 import (
 	"flag"
 	"fmt"
-	//	"sync"
+	"sync"
 	"testing"
-	//	"time"
 
 	. "gopkg.in/check.v1"
 	"gopkg.in/mgo.v2"
@@ -154,13 +153,7 @@ func (s *S) TestInsert(c *C) {
 	// exists aborts the entire transaction, so we no longer hide
 	// that fact.
 	err = s.runner.Run(ops, "")
-	// TODO: Is "IsDup" or txn.ErrAborted better for clients to handle here?
-	// With a multi-document transaction, there is no context to know
-	// *which* document was a duplicate. (the ss txn code does know which,
-	// but we don't have a good way to feed that information back).
-	if !mgo.IsDup(err) {
-		c.Fatalf("expected Duplicate error, got: %v", err)
-	}
+	c.Assert(err, Equals, txn.ErrAborted)
 
 	var account Account
 	err = s.accounts.FindId(0).One(&account)
@@ -274,10 +267,7 @@ func (s *S) TestInsertUpdate(c *C) {
 	// We no longer treat Insert as a no-op, so we don't
 	// run the Update.
 	err = s.runner.Run(ops, "")
-	c.Assert(err, NotNil)
-	if !mgo.IsDup(err) {
-		c.Errorf("expected Duplicate error, not: %v", err)
-	}
+	c.Assert(err, Equals, txn.ErrAborted)
 
 	err = s.accounts.FindId(0).One(&account)
 	c.Assert(err, IsNil)
@@ -563,601 +553,51 @@ func (s *S) TestChangeLog(c *C) {
 	c.Assert(m["people"], DeepEquals, &Log{IdList{"joe"}, []int64{-1}})
 }
 
-//
-// func (s *S) TestTxnQueueStashStressTest(c *C) {
-// 	if *fast {
-// 		c.Skip("-fast was supplied and this test is slow")
-// 	}
-// 	txn.SetChaos(txn.Chaos{
-// 		SlowdownChance: 0.3,
-// 		Slowdown:       50 * time.Millisecond,
-// 	})
-// 	defer txn.SetChaos(txn.Chaos{})
-//
-// 	// So we can run more iterations of the test in less time.
-// 	txn.SetDebug(false)
-//
-// 	const runners = 10
-// 	const inserts = 10
-// 	const repeat = 100
-//
-// 	for r := 0; r < repeat; r++ {
-// 		var wg sync.WaitGroup
-// 		wg.Add(runners)
-// 		for i := 0; i < runners; i++ {
-// 			go func(i, r int) {
-// 				defer wg.Done()
-//
-// 				session := s.session.New()
-// 				defer session.Close()
-// 				runner := txn.NewRunner(s.tc.With(session))
-//
-// 				for j := 0; j < inserts; j++ {
-// 					ops := []txn.Op{{
-// 						C:  "accounts",
-// 						Id: fmt.Sprintf("insert-%d-%d", r, j),
-// 						Insert: bson.M{
-// 							"added-by": i,
-// 						},
-// 					}}
-// 					err := runner.Run(ops, "", nil)
-// 					if err != txn.ErrAborted {
-// 						c.Check(err, IsNil)
-// 					}
-// 				}
-// 			}(i, r)
-// 		}
-// 		wg.Wait()
-// 	}
-// }
-//
-// func (s *S) checkTxnQueueLength(c *C, expectedQueueLength int) {
-// 	txn.SetDebug(false)
-// 	txn.SetChaos(txn.Chaos{
-// 		KillChance: 1,
-// 		Breakpoint: "set-applying",
-// 	})
-// 	defer txn.SetChaos(txn.Chaos{})
-// 	err := s.accounts.Insert(M{"_id": 0, "balance": 100})
-// 	c.Assert(err, IsNil)
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 100}},
-// 	}}
-// 	for i := 0; i < expectedQueueLength; i++ {
-// 		err := s.runner.Run(ops, "", nil)
-// 		c.Assert(err, Equals, txn.ErrChaos)
-// 	}
-// 	txn.SetDebug(true)
-// 	// Now that we've filled up the queue, we should see that there are 1000
-// 	// items in the queue, and the error applying a new one will change.
-// 	var doc bson.M
-// 	err = s.accounts.FindId(0).One(&doc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, expectedQueueLength)
-// 	err = s.runner.Run(ops, "", nil)
-// 	c.Check(err, ErrorMatches, `txn-queue for 0 in "accounts" has too many transactions \(\d+\)`)
-// 	// The txn-queue should not have grown
-// 	err = s.accounts.FindId(0).One(&doc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, expectedQueueLength)
-// }
-//
-// func (s *S) TestTxnQueueDefaultMaxSize(c *C) {
-// 	s.runner.SetOptions(txn.DefaultRunnerOptions())
-// 	s.checkTxnQueueLength(c, 1000)
-// }
-//
-// func (s *S) TestTxnQueueCustomMaxSize(c *C) {
-// 	opts := txn.DefaultRunnerOptions()
-// 	opts.MaxTxnQueueLength = 100
-// 	s.runner.SetOptions(opts)
-// 	s.checkTxnQueueLength(c, 100)
-// }
-//
-// func (s *S) TestTxnQueueMultipleDocs(c *C) {
-// 	expectedLength := 100
-// 	maxDocs := 110
-// 	opts := txn.DefaultRunnerOptions()
-// 	opts.MaxTxnQueueLength = expectedLength
-// 	s.runner.SetOptions(opts)
-// 	txn.SetDebug(false)
-// 	createOps := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Insert: M{"balance": 1000},
-// 	}}
-// 	for i := 1; i < maxDocs; i++ {
-// 		createOps = append(createOps, txn.Op{
-// 			C:      "accounts",
-// 			Id:     i,
-// 			Insert: M{"balance": 0},
-// 		})
-// 	}
-// 	err := s.runner.Run(createOps, "", nil)
-// 	c.Assert(err, IsNil)
-// 	// Force a bad transaction into the queue
-// 	badTxnId := "deadbeef1234567812345678_12345678"
-// 	err = s.accounts.UpdateId(0, M{"$set": M{"txn-queue": []string{badTxnId}}})
-// 	c.Assert(err, IsNil)
-// 	for i := 1; i < expectedLength; i++ {
-// 		ops := []txn.Op{{
-// 			C:      "accounts",
-// 			Id:     0,
-// 			Update: M{"$inc": M{"balance": -1}},
-// 		}, {
-// 			C:      "accounts",
-// 			Id:     i,
-// 			Update: M{"$inc": M{"balance": 1}},
-// 		}}
-// 		err = s.runner.Run(ops, "", nil)
-// 		c.Assert(err, NotNil)
-// 		c.Assert(err, ErrorMatches, `cannot find transaction ObjectIdHex."deadbeef1234567812345678".`)
-// 	}
-// 	// Now that we've filled up the txn-queue of the first document, any
-// 	// further changes should be aborted
-// 	var doc bson.M
-// 	err = s.accounts.FindId(0).One(&doc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, expectedLength)
-// 	txn.SetDebug(true)
-// 	for i := 100; i < maxDocs; i++ {
-// 		ops := []txn.Op{{
-// 			C:      "accounts",
-// 			Id:     0,
-// 			Update: M{"$inc": M{"balance": -1}},
-// 		}, {
-// 			C:      "accounts",
-// 			Id:     i,
-// 			Update: M{"$inc": M{"balance": 1}},
-// 		}}
-// 		err = s.runner.Run(ops, "", nil)
-// 		c.Assert(err, NotNil)
-// 		c.Check(err, ErrorMatches, `txn-queue for 0 in "accounts" has too many transactions \(\d+\)`)
-// 	}
-// 	err = s.accounts.FindId(0).One(&doc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, expectedLength)
-// 	err = s.accounts.UpdateId(0, M{"$pullAll": M{"txn-queue": []string{badTxnId}}})
-// 	c.Assert(err, IsNil)
-// 	c.Log("Updated removing the invalid transaction")
-// 	// Now we should be able to cleanup
-// 	err = s.runner.ResumeAll()
-// 	c.Assert(err, IsNil)
-// 	c.Log("resumed all")
-// }
-//
-// func (s *S) TestTxnQueueUnlimited(c *C) {
-// 	opts := txn.DefaultRunnerOptions()
-// 	// A value of 0 should mean 'unlimited'
-// 	opts.MaxTxnQueueLength = 0
-// 	s.runner.SetOptions(opts)
-// 	// it isn't possible to actually prove 'unlimited' but we can prove that
-// 	// we at least can insert more than the default number of transactions
-// 	// without getting a 'too many transactions' failure.
-// 	txn.SetDebug(false)
-// 	txn.SetChaos(txn.Chaos{
-// 		KillChance: 1,
-// 		// Use set-prepared because we are adding more transactions than
-// 		// other tests, and this speeds up setup time a bit
-// 		Breakpoint: "set-prepared",
-// 	})
-// 	defer txn.SetChaos(txn.Chaos{})
-// 	err := s.accounts.Insert(M{"_id": 0, "balance": 100})
-// 	c.Assert(err, IsNil)
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 100}},
-// 	}}
-// 	for i := 0; i < 1100; i++ {
-// 		err := s.runner.Run(ops, "", nil)
-// 		c.Assert(err, Equals, txn.ErrChaos)
-// 	}
-// 	txn.SetDebug(true)
-// 	var doc bson.M
-// 	err = s.accounts.FindId(0).One(&doc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, 1100)
-// 	err = s.runner.Run(ops, "", nil)
-// 	c.Check(err, Equals, txn.ErrChaos)
-// 	err = s.accounts.FindId(0).One(&doc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(doc["txn-queue"].([]interface{})), Equals, 1101)
-// }
-//
-// func (s *S) TestTxnQueueAssertionsDefault(c *C) {
-// 	opts := txn.DefaultRunnerOptions()
-// 	// We force the MaxTxnQueueLength to be shorter, so we don't have to do
-// 	// as many iterations to get it to fail.
-// 	// Without any default pruning, the queue on the assert-only document
-// 	// will grow longer than this length, and that will cause transactions
-// 	// to stop being applied.
-// 	opts.MaxTxnQueueLength = 500
-// 	s.runner.SetOptions(opts)
-// 	// By default we should prevent a txn-queue from growing too large
-// 	txn.SetDebug(false)
-// 	c.Assert(s.accounts.Insert(M{"_id": 0, "balance": 100}), IsNil)
-// 	c.Assert(s.accounts.Insert(M{"_id": 1, "balance": 100}), IsNil)
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Assert: M{"balance": 100},
-// 	}, {
-// 		C:      "accounts",
-// 		Id:     1,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}}
-// 	for i := 0; i < 600; i++ {
-// 		c.Assert(s.runner.Run(ops, "", nil), IsNil)
-// 	}
-// 	var a0 txnQueue
-// 	c.Assert(s.accounts.FindId(0).One(&a0), IsNil)
-// 	var a1 txnQueue
-// 	c.Assert(s.accounts.FindId(1).One(&a1), IsNil)
-// 	c.Check(len(a0.Queue) < 500, Equals, true,
-// 		Commentf("txn-queue grew too long: len=%d", len(a0.Queue)))
-// 	c.Check(len(a1.Queue) < 500, Equals, true,
-// 		Commentf("txn-queue grew too long: len=%d", len(a1.Queue)))
-// }
-//
-// func (s *S) TestTxnQueueAssertionsCustomValue(c *C) {
-// 	opts := txn.DefaultRunnerOptions()
-// 	opts.AssertionCleanupLength = 17
-// 	s.runner.SetOptions(opts)
-// 	// By default we should prevent a txn-queue from growing too large
-// 	txn.SetDebug(false)
-// 	c.Assert(s.accounts.Insert(M{"_id": 0, "balance": 100}), IsNil)
-// 	c.Assert(s.accounts.Insert(M{"_id": 1, "balance": 100}), IsNil)
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Assert: M{"balance": 100},
-// 	}, {
-// 		C:      "accounts",
-// 		Id:     1,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}}
-// 	for i := 0; i < 100; i++ {
-// 		c.Assert(s.runner.Run(ops, "", nil), IsNil)
-// 	}
-// 	var a0 txnQueue
-// 	c.Assert(s.accounts.FindId(0).One(&a0), IsNil)
-// 	var a1 txnQueue
-// 	c.Assert(s.accounts.FindId(1).One(&a1), IsNil)
-// 	c.Check(len(a0.Queue) <= 17, Equals, true,
-// 		Commentf("txn-queue grew too long: len=%d", len(a0.Queue)))
-// 	c.Check(len(a1.Queue) <= 17, Equals, true,
-// 		Commentf("txn-queue grew too long: len=%d", len(a1.Queue)))
-// }
-//
-// func (s *S) TestTxnQueueAssertionsDisabled(c *C) {
-// 	opts := txn.DefaultRunnerOptions()
-// 	opts.AssertionCleanupLength = 0
-// 	s.runner.SetOptions(opts)
-// 	// By default we should prevent a txn-queue from growing too large
-// 	txn.SetDebug(false)
-// 	c.Assert(s.accounts.Insert(M{"_id": 0, "balance": 100}), IsNil)
-// 	c.Assert(s.accounts.Insert(M{"_id": 1, "balance": 100}), IsNil)
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Assert: M{"balance": 100},
-// 	}, {
-// 		C:      "accounts",
-// 		Id:     1,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}}
-// 	for i := 0; i < 200; i++ {
-// 		c.Assert(s.runner.Run(ops, "", nil), IsNil)
-// 	}
-// 	var a0 txnQueue
-// 	c.Assert(s.accounts.FindId(0).One(&a0), IsNil)
-// 	c.Check(len(a0.Queue), Equals, 200,
-// 		Commentf("queue length did not match expected %d: actual: %d", 200, len(a0.Queue)))
-// }
-//
-// func (s *S) TestPurgeMissingPipelineSizeLimit(c *C) {
-// 	// This test ensures that PurgeMissing can handle very large
-// 	// txn-queue fields. Previous iterations of PurgeMissing would
-// 	// trigger a 16MB aggregation pipeline result size limit when run
-// 	// against a documents or stashes with large numbers of txn-queue
-// 	// entries. PurgeMissing now no longer uses aggregation pipelines
-// 	// to work around this limit.
-//
-// 	// The pipeline result size limitation was removed from MongoDB in 2.6 so
-// 	// this test is only run for older MongoDB version.
-// 	build, err := s.session.BuildInfo()
-// 	c.Assert(err, IsNil)
-// 	if build.VersionAtLeast(2, 6) {
-// 		c.Skip("This tests a problem that can only happen with MongoDB < 2.6 ")
-// 	}
-//
-// 	// Insert a single document to work with.
-// 	err = s.accounts.Insert(M{"_id": 0, "balance": 100})
-// 	c.Assert(err, IsNil)
-//
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 100}},
-// 	}}
-//
-// 	// Generate one successful transaction.
-// 	good := bson.NewObjectId()
-// 	c.Logf("---- Running ops under transaction %q", good.Hex())
-// 	err = s.runner.Run(ops, good, nil)
-// 	c.Assert(err, IsNil)
-//
-// 	// Generate another transaction which which will go missing.
-// 	missing := bson.NewObjectId()
-// 	c.Logf("---- Running ops under transaction %q (which will go missing)", missing.Hex())
-// 	err = s.runner.Run(ops, missing, nil)
-// 	c.Assert(err, IsNil)
-//
-// 	err = s.tc.RemoveId(missing)
-// 	c.Assert(err, IsNil)
-//
-// 	// Generate a txn-queue on the test document that's large enough
-// 	// that it used to cause PurgeMissing to exceed MongoDB's pipeline
-// 	// result 16MB size limit (MongoDB 2.4 and older only).
-// 	//
-// 	// The contents of the txn-queue field doesn't matter, only that
-// 	// it's big enough to trigger the size limit. The required size
-// 	// can also be achieved by using multiple documents as long as the
-// 	// cumulative size of all the txn-queue fields exceeds the
-// 	// pipeline limit. A single document is easier to work with for
-// 	// this test however.
-// 	//
-// 	// The txn id of the successful transaction is used fill the
-// 	// txn-queue because this takes advantage of a short circuit in
-// 	// PurgeMissing, dramatically speeding up the test run time.
-// 	const fakeQueueLen = 250000
-// 	fakeTxnQueue := make([]string, fakeQueueLen)
-// 	token := good.Hex() + "_12345678" // txn id + nonce
-// 	for i := 0; i < fakeQueueLen; i++ {
-// 		fakeTxnQueue[i] = token
-// 	}
-//
-// 	err = s.accounts.UpdateId(0, bson.M{
-// 		"$set": bson.M{"txn-queue": fakeTxnQueue},
-// 	})
-// 	c.Assert(err, IsNil)
-//
-// 	// PurgeMissing could hit the same pipeline result size limit when
-// 	// processing the txn-queue fields of stash documents so insert
-// 	// the large txn-queue there too to ensure that no longer happens.
-// 	err = s.sc.Insert(
-// 		bson.D{{"c", "accounts"}, {"id", 0}},
-// 		bson.M{"txn-queue": fakeTxnQueue},
-// 	)
-// 	c.Assert(err, IsNil)
-//
-// 	c.Logf("---- Purging missing transactions")
-// 	err = s.runner.PurgeMissing("accounts")
-// 	c.Assert(err, IsNil)
-// }
-//
-// var flaky = flag.Bool("flaky", false, "Include flaky tests")
-// var txnQueueLength = flag.Int("qlength", 100, "txn-queue length for tests")
-//
-// func (s *S) TestTxnQueueStressTest(c *C) {
-// 	// This fails about 20% of the time on Mongo 3.2 (I haven't tried
-// 	// other versions) with account balance being 3999 instead of
-// 	// 4000. That implies that some updates are being lost. This is
-// 	// bad and we'll need to chase it down in the near future - the
-// 	// only reason it's being skipped now is that it's already failing
-// 	// and it's better to have the txn tests running without this one
-// 	// than to have them not running at all.
-// 	if !*flaky {
-// 		c.Skip("Fails intermittently - disabling until fixed")
-// 	}
-// 	txn.SetChaos(txn.Chaos{
-// 		SlowdownChance: 0.3,
-// 		Slowdown:       50 * time.Millisecond,
-// 	})
-// 	defer txn.SetChaos(txn.Chaos{})
-//
-// 	// So we can run more iterations of the test in less time.
-// 	txn.SetDebug(false)
-//
-// 	err := s.accounts.Insert(M{"_id": 0, "balance": 0}, M{"_id": 1, "balance": 0})
-// 	c.Assert(err, IsNil)
-//
-// 	// Run half of the operations changing account 0 and then 1,
-// 	// and the other half in the opposite order.
-// 	ops01 := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}, {
-// 		C:      "accounts",
-// 		Id:     1,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}}
-//
-// 	ops10 := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     1,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}, {
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 1}},
-// 	}}
-//
-// 	ops := [][]txn.Op{ops01, ops10}
-//
-// 	const runners = 4
-// 	const changes = 1000
-//
-// 	var wg sync.WaitGroup
-// 	wg.Add(runners)
-// 	for n := 0; n < runners; n++ {
-// 		n := n
-// 		go func() {
-// 			defer wg.Done()
-// 			for i := 0; i < changes; i++ {
-// 				err = s.runner.Run(ops[n%2], "", nil)
-// 				c.Assert(err, IsNil)
-// 			}
-// 		}()
-// 	}
-// 	wg.Wait()
-//
-// 	for id := 0; id < 2; id++ {
-// 		var account Account
-// 		err = s.accounts.FindId(id).One(&account)
-// 		if account.Balance != runners*changes {
-// 			c.Errorf("Account should have balance of %d, got %d", runners*changes, account.Balance)
-// 		}
-// 	}
-// }
-//
-// type txnQueue struct {
-// 	Queue []string `bson:"txn-queue"`
-// }
-//
-// func (s *S) TestTxnQueueAssertionGrowth(c *C) {
-// 	txn.SetDebug(false) // too much spam
-// 	opts := txn.DefaultRunnerOptions()
-// 	// Disable automatic cleanup of queue, so that we can see the queue
-// 	// properly cleared on update.
-// 	opts.AssertionCleanupLength = 0
-// 	s.runner.SetOptions(opts)
-// 	err := s.accounts.Insert(M{"_id": 0, "balance": 0})
-// 	c.Assert(err, IsNil)
-// 	// Create many assertion only transactions.
-// 	t := time.Now()
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Assert: M{"balance": 0},
-// 	}}
-// 	for n := 0; n < *txnQueueLength; n++ {
-// 		err = s.runner.Run(ops, "", nil)
-// 		c.Assert(err, IsNil)
-// 	}
-// 	var qdoc txnQueue
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(qdoc.Queue), Equals, *txnQueueLength)
-// 	c.Logf("%8.3fs to set up %d assertions", time.Since(t).Seconds(), *txnQueueLength)
-// 	t = time.Now()
-// 	txn.SetChaos(txn.Chaos{})
-// 	ops = []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 100}},
-// 	}}
-// 	err = s.runner.Run(ops, "", nil)
-// 	c.Logf("%8.3fs to clear N=%d assertions and add one more txn",
-// 		time.Since(t).Seconds(), *txnQueueLength)
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(qdoc.Queue), Equals, 1)
-// }
-//
-// func (s *S) TestTxnQueueBrokenPrepared(c *C) {
-// 	txn.SetDebug(false) // too much spam
-// 	badTxnToken := "123456789012345678901234_deadbeef"
-// 	err := s.accounts.Insert(M{"_id": 0, "balance": 0, "txn-queue": []string{badTxnToken}})
-// 	c.Assert(err, IsNil)
-// 	t := time.Now()
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$set": M{"balance": 0}},
-// 	}}
-// 	errString := `cannot find transaction ObjectIdHex("123456789012345678901234")`
-// 	for n := 0; n < *txnQueueLength; n++ {
-// 		err = s.runner.Run(ops, "", nil)
-// 		c.Assert(err.Error(), Equals, errString)
-// 	}
-// 	var qdoc txnQueue
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(qdoc.Queue), Equals, *txnQueueLength+1)
-// 	c.Logf("%8.3fs to set up %d 'prepared' txns", time.Since(t).Seconds(), *txnQueueLength)
-// 	t = time.Now()
-// 	s.accounts.UpdateId(0, bson.M{"$pullAll": bson.M{"txn-queue": []string{badTxnToken}}})
-// 	ops = []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$inc": M{"balance": 100}},
-// 	}}
-// 	err = s.runner.ResumeAll()
-// 	c.Assert(err, IsNil)
-// 	c.Logf("%8.3fs to ResumeAll N=%d 'prepared' txns",
-// 		time.Since(t).Seconds(), *txnQueueLength)
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(qdoc.Queue), Equals, 1)
-// }
-//
-// func (s *S) TestTxnQueuePreparing(c *C) {
-// 	txn.SetDebug(false) // too much spam
-// 	err := s.accounts.Insert(M{"_id": 0, "balance": 0, "txn-queue": []string{}})
-// 	c.Assert(err, IsNil)
-// 	t := time.Now()
-// 	txn.SetChaos(txn.Chaos{
-// 		KillChance: 1.0,
-// 		Breakpoint: "set-prepared",
-// 	})
-// 	ops := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Update: M{"$set": M{"balance": 0}},
-// 	}}
-// 	for n := 0; n < *txnQueueLength; n++ {
-// 		err = s.runner.Run(ops, "", nil)
-// 		c.Assert(err, Equals, txn.ErrChaos)
-// 	}
-// 	var qdoc txnQueue
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	c.Check(len(qdoc.Queue), Equals, *txnQueueLength)
-// 	c.Logf("%8.3fs to set up %d 'preparing' txns", time.Since(t).Seconds(), *txnQueueLength)
-// 	txn.SetChaos(txn.Chaos{})
-// 	t = time.Now()
-// 	err = s.runner.ResumeAll()
-// 	c.Logf("%8.3fs to ResumeAll N=%d 'preparing' txns",
-// 		time.Since(t).Seconds(), *txnQueueLength)
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	expectedCount := 100
-// 	if *txnQueueLength <= expectedCount {
-// 		expectedCount = *txnQueueLength - 1
-// 	}
-// 	c.Check(len(qdoc.Queue), Equals, expectedCount)
-// }
-//
-// func (s *S) TestTxnQueueAddAndRemove(c *C) {
-// 	opts := txn.DefaultRunnerOptions()
-// 	opts.MaxTxnQueueLength = 10
-// 	s.runner.SetOptions(opts)
-// 	opInsert := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Insert: M{"balance": 0},
-// 	}}
-// 	opRemove := []txn.Op{{
-// 		C:      "accounts",
-// 		Id:     0,
-// 		Remove: true,
-// 	}}
-// 	err := s.runner.Run(opInsert, "", nil)
-// 	c.Assert(err, IsNil)
-// 	for n := 0; n < 10; n++ {
-// 		err = s.runner.Run(opRemove, "", nil)
-// 		c.Assert(err, IsNil)
-// 		err = s.runner.Run(opInsert, "", nil)
-// 		c.Assert(err, IsNil)
-// 	}
-// 	var qdoc txnQueue
-// 	err = s.accounts.FindId(0).One(&qdoc)
-// 	c.Assert(err, IsNil)
-// 	// Both Remove and Insert should prune all the completed transactions
-// 	c.Check(len(qdoc.Queue), Equals, 1)
-// }
+func (s *S) TestInsertStressTest(c *C) {
+	if *fast {
+		c.Skip("-fast was supplied and this test is slow")
+	}
+	// TODO: implement Chaos
+	// txn.SetChaos(txn.Chaos{
+	// 	SlowdownChance: 0.3,
+	// 	Slowdown:       50 * time.Millisecond,
+	// })
+	// defer txn.SetChaos(txn.Chaos{})
+
+	// So we can run more iterations of the test in less time.
+	txn.SetDebug(false)
+
+	const runners = 10
+	const inserts = 10
+	const repeat = 100
+
+	logger := &testLogger{c}
+	for r := 0; r < repeat; r++ {
+		var wg sync.WaitGroup
+		wg.Add(runners)
+		for i := 0; i < runners; i++ {
+			go func(i, r int) {
+				defer wg.Done()
+
+				session := s.session.New()
+				defer session.Close()
+				runner := sstxn.NewRunner(s.db.With(session), logger)
+
+				for j := 0; j < inserts; j++ {
+					ops := []txn.Op{{
+						C:  "accounts",
+						Id: fmt.Sprintf("insert-%d-%d", r, j),
+						Insert: bson.M{
+							"added-by": i,
+						},
+					}}
+					err := runner.Run(ops, "")
+					if err != txn.ErrAborted {
+						c.Check(err, IsNil)
+					}
+				}
+			}(i, r)
+		}
+		wg.Wait()
+	}
+}

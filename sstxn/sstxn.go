@@ -130,27 +130,27 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId) (err error) {
 		id = bson.NewObjectId()
 	}
 	completed := false
-	if err := r.db.Session.StartTransaction(); err != nil {
+	if err = r.db.Session.StartTransaction(); err != nil {
 		return err
 	}
 	defer func() {
 		if !completed {
-			err := r.db.Session.AbortTransaction()
-			if err != nil {
-				r.logger.Errorf("error while aborting: %v", err)
+			abortErr := r.db.Session.AbortTransaction()
+			if abortErr != nil {
+				r.logger.Errorf("error while aborting: %v", abortErr)
 			}
 		}
 	}()
-	if err := r.checkAsserts(ops); err != nil {
+	if err = r.checkAsserts(ops); err != nil {
 		return err
 	}
-	if err := r.applyOps(ops); err != nil {
+	if err = r.applyOps(ops); err != nil {
 		return err
 	}
-	if err := r.updateLog(ops, id); err != nil {
+	if err = r.updateLog(ops, id); err != nil {
 		return err
 	}
-	if err := r.db.Session.CommitTransaction(); err != nil {
+	if err = r.db.Session.CommitTransaction(); err != nil {
 		return err
 	}
 	completed = true
@@ -165,6 +165,16 @@ type revnoDoc struct {
 }
 
 func (r *Runner) checkAsserts(ops []txn.Op) error {
+	// XXX: users of this API should have already read the documents and
+	// built their changes on it. Thus we shouldn't have to redo assertions
+	// here, which would let us avoid re-reading the documents.
+	// What we really want is for the TXN to live for the lifetime of the buildTxn function.
+	// So that once the build starts, we can ensure that the documents are read
+	// as part of the transaction, and that they won't be changing during the
+	// lifetime of all of those documents that are read.
+	// That said... if we are going to do assertion checking, we might as well
+	// read the revnos, because most of the docs should have an Assert, so we
+	// have to read them anyway.
 	for _, op := range ops {
 		if op.Assert == nil {
 			continue
@@ -298,6 +308,16 @@ func (r *Runner) applyUpdate(op txn.Op) error {
 	}
 }
 
+// IsWriteConflict checks if the supplied error is a Mongo WriteConflict error.
+// Indicating we had 2 transactions trying to write to the same document.
+func IsWriteConflict(err error) bool {
+	if e, ok := err.(*mgo.QueryError); ok {
+		if e.Code == 112 {
+			return true
+		}
+	}
+	return false
+}
 func (r *Runner) applyInsert(op txn.Op) error {
 	c := r.db.C(op.C)
 	r.logger.Tracef("inserting op: %#v", op)
@@ -316,6 +336,10 @@ func (r *Runner) applyInsert(op txn.Op) error {
 	if err == nil {
 		// happy path
 		return nil
+	} else if mgo.IsDup(err) || IsWriteConflict(err) {
+		// This has triggered a server-side abort, so make sure the user
+		// understands the txn is aborted
+		return txn.ErrAborted
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
 		return err
