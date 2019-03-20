@@ -141,13 +141,14 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId) (err error) {
 			}
 		}
 	}()
-	if err = r.checkAsserts(ops); err != nil {
+	var revnos []int64
+	if revnos, err = r.checkAsserts(ops); err != nil {
 		return err
 	}
-	if err = r.applyOps(ops); err != nil {
+	if err = r.applyOps(ops, revnos); err != nil {
 		return err
 	}
-	if err = r.updateLog(ops, id); err != nil {
+	if err = r.updateLog(ops, revnos, id); err != nil {
 		return err
 	}
 	if err = r.db.Session.CommitTransaction(); err != nil {
@@ -164,7 +165,7 @@ type revnoDoc struct {
 	Revno int64 `bson:"txn-revno,omitempty"`
 }
 
-func (r *Runner) checkAsserts(ops []txn.Op) error {
+func (r *Runner) checkAsserts(ops []txn.Op) ([]int64, error) {
 	// XXX: users of this API should have already read the documents and
 	// built their changes on it. Thus we shouldn't have to redo assertions
 	// here, which would let us avoid re-reading the documents.
@@ -172,32 +173,45 @@ func (r *Runner) checkAsserts(ops []txn.Op) error {
 	// So that once the build starts, we can ensure that the documents are read
 	// as part of the transaction, and that they won't be changing during the
 	// lifetime of all of those documents that are read.
+
 	// That said... if we are going to do assertion checking, we might as well
 	// read the revnos, because most of the docs should have an Assert, so we
 	// have to read them anyway.
-	for _, op := range ops {
+	revnos := make([]int64, len(ops))
+	for i, op := range ops {
+		c := r.db.C(op.C)
+		var rDoc revnoDoc
 		if op.Assert == nil {
+			err := c.FindId(op.Id).Select(revnoFields).One(&rDoc)
+			if err != nil {
+				if err != mgo.ErrNotFound {
+					return nil, err
+				}
+				revnos[i] = -1
+			} else {
+				revnos[i] = rDoc.Revno
+			}
 			continue
 		}
 		if op.Insert != nil && op.Assert != txn.DocMissing {
 			if op.Assert == txn.DocExists {
-				return fmt.Errorf("Insert can only Assert txn.DocMissing not txn.DocExists")
+				return nil, fmt.Errorf("Insert can only Assert txn.DocMissing not txn.DocExists")
 			} else {
-				return fmt.Errorf("Insert can only Assert txn.DocMissing not %v", op.Assert)
+				return nil, fmt.Errorf("Insert can only Assert txn.DocMissing not %v", op.Assert)
 			}
 		}
 
-		c := r.db.C(op.C)
 		if op.Assert == txn.DocExists {
-			if c.FindId(op.Id).Select(idFields).One(nil) == mgo.ErrNotFound {
+			if c.FindId(op.Id).Select(revnoFields).One(&rDoc) == mgo.ErrNotFound {
 				r.logger.Tracef("DocExists assertion failed for op: %#v", op)
-				return txn.ErrAborted
+				return nil, txn.ErrAborted
 			}
 		} else if op.Assert == txn.DocMissing {
 			if c.FindId(op.Id).Select(idFields).One(nil) != mgo.ErrNotFound {
 				r.logger.Tracef("DocMissing assertion failed for op: %#v", op)
-				return txn.ErrAborted
+				return nil, txn.ErrAborted
 			}
+			rDoc.Revno = -1
 		} else {
 			// Client side txns used to assert on txn-revno not changing once
 			// the document was 'prepared'. But we don't actually care, so
@@ -205,13 +219,14 @@ func (r *Runner) checkAsserts(ops []txn.Op) error {
 			qdoc := bson.D{{Name: "_id", Value: op.Id}}
 			// client-side txns use $or here, seems an odd choice.
 			qdoc = append(qdoc, bson.DocElem{"$or", []interface{}{op.Assert}})
-			if c.Find(qdoc).Select(idFields).One(nil) == mgo.ErrNotFound {
+			if c.Find(qdoc).Select(revnoFields).One(&rDoc) == mgo.ErrNotFound {
 				r.logger.Tracef("assertion failed for op: %#v", op)
-				return txn.ErrAborted
+				return nil, txn.ErrAborted
 			}
 		}
+		revnos[i] = rDoc.Revno
 	}
-	return nil
+	return revnos, nil
 }
 
 // objToDoc converts an arbitrary Struct/bson.D/bson.M to a pure bson.D by
@@ -260,16 +275,16 @@ func setInDoc(doc bson.D, name string, value interface{}) bson.D {
 	return doc
 }
 
-func (r *Runner) applyOps(ops []txn.Op) error {
-	for _, op := range ops {
+func (r *Runner) applyOps(ops []txn.Op, revnos []int64) error {
+	for i, op := range ops {
 		var err error
 		switch {
 		case op.Update != nil:
-			err = r.applyUpdate(op)
+			err = r.applyUpdate(op, &revnos[i])
 		case op.Insert != nil:
-			err = r.applyInsert(op)
+			err = r.applyInsert(op, &revnos[i])
 		case op.Remove:
-			err = r.applyRemove(op)
+			err = r.applyRemove(op, &revnos[i])
 		}
 		if err != nil {
 			return err
@@ -278,7 +293,7 @@ func (r *Runner) applyOps(ops []txn.Op) error {
 	return nil
 }
 
-func (r *Runner) applyUpdate(op txn.Op) error {
+func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
 	// XXX: do we need to track the revno of the doc from the time we did the Assert
 	// until we do this update? I'm hoping we don't as that is the point of
 	// using a server Transaction.
@@ -289,15 +304,14 @@ func (r *Runner) applyUpdate(op txn.Op) error {
 		// TODO: Test unmarshallable Update
 		return err
 	}
-	r.logger.Tracef("raw update doc: %#v", d)
 	// Note: Mongo will accept this being passed in as an extra entry in d.
 	// We don't *have* to put it in the same "$inc" section. Might be nicer
 	// to be appending the content at the end.
-	d, err = addToDoc(d, "$inc", bson.D{{"txn-revno", 1}})
+	*revno++
+	d, err = addToDoc(d, "$set", bson.D{{"txn-revno", *revno}})
 	if err != nil {
 		return err
 	}
-	r.logger.Tracef("update doc: %#v", d)
 	err = c.UpdateId(op.Id, d)
 	if err == nil {
 		// happy path
@@ -318,7 +332,7 @@ func IsWriteConflict(err error) bool {
 	}
 	return false
 }
-func (r *Runner) applyInsert(op txn.Op) error {
+func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	c := r.db.C(op.C)
 	r.logger.Tracef("inserting op: %#v", op)
 	// XXX: Do we need a txns.stash? Without one,
@@ -332,6 +346,7 @@ func (r *Runner) applyInsert(op txn.Op) error {
 	}
 	d = setInDoc(d, "_id", op.Id)
 	d = setInDoc(d, "txn-revno", 2)
+	*revno = 2
 	err = c.Insert(d)
 	if err == nil {
 		// happy path
@@ -346,10 +361,12 @@ func (r *Runner) applyInsert(op txn.Op) error {
 	}
 }
 
-func (r *Runner) applyRemove(op txn.Op) error {
+func (r *Runner) applyRemove(op txn.Op, revno *int64) error {
 	c := r.db.C(op.C)
 	r.logger.Tracef("remove op: %#v", op)
 	err := c.RemoveId(op.Id)
+	// We negate the revno to indicate it was deleted
+	*revno = -(*revno + 1)
 	if err == nil || err == mgo.ErrNotFound {
 		// happy path
 		// note that removing a non-existing object does *not* abort the transaction
@@ -361,7 +378,7 @@ func (r *Runner) applyRemove(op txn.Op) error {
 	}
 }
 
-func (r *Runner) updateLog(ops []txn.Op, txnId bson.ObjectId) error {
+func (r *Runner) updateLog(ops []txn.Op, revnos []int64, txnId bson.ObjectId) error {
 	if r.logCollection == nil {
 		return nil
 	}
@@ -373,7 +390,7 @@ func (r *Runner) updateLog(ops []txn.Op, txnId bson.ObjectId) error {
 	//  This code causes us to reread all the documents we just wrote,
 	//  which isn't great.
 	logDoc := bson.D{{Name: "_id", Value: txnId}}
-	for _, op := range ops {
+	for i, op := range ops {
 		if op.Insert == nil && op.Update == nil && !op.Remove {
 			// this is assert only, so it isn't considered a change
 			continue
@@ -391,17 +408,8 @@ func (r *Runner) updateLog(ops []txn.Op, txnId bson.ObjectId) error {
 			dr = bson.D{{"d", []interface{}{}}, {"r", []int64{}}}
 			logDoc = append(logDoc, bson.DocElem{op.C, dr})
 		}
-		c := r.db.C(op.C)
-		var rDoc revnoDoc
-		if err := c.FindId(op.Id).Select(revnoFields).One(&rDoc); err != nil {
-			if err == mgo.ErrNotFound {
-				rDoc.Revno = -1
-			} else {
-				return err
-			}
-		}
 		dr[0].Value = append(dr[0].Value.([]interface{}), op.Id)
-		dr[1].Value = append(dr[1].Value.([]int64), rDoc.Revno)
+		dr[1].Value = append(dr[1].Value.([]int64), revnos[i])
 	}
 	if err := r.logCollection.Insert(logDoc); err != nil {
 		return err

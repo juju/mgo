@@ -549,8 +549,8 @@ func (s *S) TestChangeLog(c *C) {
 	err = chglog.FindId(id).One(&m)
 	c.Assert(err, IsNil)
 
-	c.Assert(m["accounts"], DeepEquals, &Log{IdList{0}, []int64{-1}})
-	c.Assert(m["people"], DeepEquals, &Log{IdList{"joe"}, []int64{-1}})
+	c.Assert(m["accounts"], DeepEquals, &Log{IdList{0}, []int64{-4}})
+	c.Assert(m["people"], DeepEquals, &Log{IdList{"joe"}, []int64{-3}})
 }
 
 func (s *S) TestInsertStressTest(c *C) {
