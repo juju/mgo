@@ -354,6 +354,40 @@ func (s *S) TestAbortTransactionTwice(c *C) {
 	c.Assert(err, ErrorMatches, "no transaction in progress")
 }
 
+func (s *S) TestTransactionInvalidOpAborted(c *C) {
+	session, coll := s.setupTxnSessionAndCollection(c)
+	defer session.Close()
+	c.Assert(coll.Insert(bson.M{"_id": 1, "val": "foo"}), IsNil)
+	c.Assert(session.StartTransaction(), IsNil)
+	defer session.AbortTransaction()
+	err := coll.Insert(bson.M{"_id": 1, "val": "bar"})
+	c.Assert(err, NotNil)
+	if !mgo.IsDup(err) {
+		c.Errorf("expected Insert to fail with Duplicate, not %v", err)
+	}
+	// under the covers, this might get a 'transaction already aborted' message,
+	// but we should not bubble that up
+	c.Assert(session.AbortTransaction(), IsNil)
+}
+
+func (s *S) TestCommitServerAbortedTransaction(c *C) {
+	session, coll := s.setupTxnSessionAndCollection(c)
+	defer session.Close()
+	c.Assert(coll.Insert(bson.M{"_id": 1, "val": "foo"}), IsNil)
+	c.Assert(session.StartTransaction(), IsNil)
+	defer session.AbortTransaction()
+	err := coll.Insert(bson.M{"_id": 1, "val": "bar"})
+	c.Assert(err, NotNil)
+	c.Assert(mgo.IsDup(err), Equals, true,
+		Commentf("expected Insert to fail with Duplicate, not %v", err))
+	err = session.CommitTransaction()
+	c.Assert(err, NotNil)
+	c.Assert(mgo.IsTxnAborted(err), Equals, true,
+		Commentf("expected Commit to fail with TxnAborted, not %v", err))
+	// CommitTransaction has noted that we are no longer in a transaction
+	c.Assert(session.AbortTransaction(), ErrorMatches, "no transaction in progress")
+}
+
 func (s *S) TestCommitTransactionTwice(c *C) {
 	session, coll := s.setupTxnSessionAndCollection(c)
 	defer session.Close()
@@ -447,8 +481,8 @@ func (s *S) TestCloneDifferentSessionTransaction(c *C) {
 	c.Assert(session2.StartTransaction(), IsNil)
 	c.Assert(coll2.Insert(bson.M{"a": "second", "b": "c"}), IsNil)
 	c.Check(coll1.Find(bson.M{"a": "second"}).One(&res), Equals, mgo.ErrNotFound)
-	session1.CommitTransaction()
-	session2.CommitTransaction()
+	c.Assert(session1.CommitTransaction(), IsNil)
+	c.Assert(session2.CommitTransaction(), IsNil)
 	c.Check(coll2.Find(bson.M{"a": "a"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)
 	c.Check(res, DeepEquals, bson.M{"a": "a", "b": "b"})
 	c.Check(coll1.Find(bson.M{"a": "second"}).Select(bson.M{"a": 1, "b": 1, "_id": 0}).One(&res), IsNil)

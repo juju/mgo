@@ -2460,6 +2460,16 @@ func IsDup(err error) bool {
 	return false
 }
 
+// IsTxnAborted is returned when trying to do an operation but the transaction
+// is already aborted
+func IsTxnAborted(err error) bool {
+	switch e := err.(type) {
+	case *QueryError:
+		return e.Code == 251
+	}
+	return false
+}
+
 // Insert inserts one or more documents in the respective collection.  In
 // case the session is in safe mode (see the SetSafe method) and an error
 // happens while inserting the provided documents, the returned error will
@@ -4991,5 +5001,10 @@ func (s *Session) CommitTransaction() error {
 }
 
 func (s *Session) AbortTransaction() error {
-	return s.finishTransaction("abortTransaction")
+	err := s.finishTransaction("abortTransaction")
+	if IsTxnAborted(err) {
+		// Aborting an aborted transaction is not an error
+		return nil
+	}
+	return err
 }
