@@ -87,8 +87,8 @@ func NewRunner(db *mgo.Database, logger Logger) *Runner {
 // down ahead of time to later verify the success of the change and
 // resume it, when the procedure is interrupted for any reason. If
 // empty, a random id will be generated.
-// The info parameter, if not nil, is included under the "i"
-// field of the transaction document.
+// The info parameter, is ignored, and only preserved for api compatibility
+// with client-side transaction Runner.Run()
 //
 // Operations across documents are not atomically applied, but are
 // guaranteed to be eventually all applied in the order provided or
@@ -102,7 +102,7 @@ func NewRunner(db *mgo.Database, logger Logger) *Runner {
 //
 // Any number of transactions may be run concurrently, with one
 // runner or many.
-func (r *Runner) Run(ops []txn.Op, id bson.ObjectId) (err error) {
+func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err error) {
 	const efmt = "error in transaction op %d: %s"
 	for i := range ops {
 		op := &ops[i]
@@ -432,4 +432,9 @@ func (r *Runner) updateLog(ops []txn.Op, revnos []int64, txnId bson.ObjectId) er
 // attempted when the document isn't present.
 func (r *Runner) ChangeLog(logc *mgo.Collection) {
 	r.logCollection = logc
+}
+
+// ResumeAll is a no-op on server-side transactions because there is nothing to resume.
+func (r *Runner) ResumeAll() error {
+	return nil
 }

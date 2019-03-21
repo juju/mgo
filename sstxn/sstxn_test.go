@@ -123,17 +123,17 @@ func (s *S) TestDocExists(c *C) {
 		Assert: txn.DocMissing,
 	}}
 
-	err = s.runner.Run(exists, "")
+	err = s.runner.Run(exists, "", nil)
 	c.Assert(err, IsNil)
-	err = s.runner.Run(missing, "")
+	err = s.runner.Run(missing, "", nil)
 	c.Assert(err, Equals, txn.ErrAborted)
 
 	err = s.accounts.RemoveId(0)
 	c.Assert(err, IsNil)
 
-	err = s.runner.Run(exists, "")
+	err = s.runner.Run(exists, "", nil)
 	c.Assert(err, Equals, txn.ErrAborted)
-	err = s.runner.Run(missing, "")
+	err = s.runner.Run(missing, "", nil)
 	c.Assert(err, IsNil)
 }
 
@@ -152,7 +152,7 @@ func (s *S) TestInsert(c *C) {
 	// server side transactions, trying to insert a doc that already
 	// exists aborts the entire transaction, so we no longer hide
 	// that fact.
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, Equals, txn.ErrAborted)
 
 	var account Account
@@ -161,7 +161,7 @@ func (s *S) TestInsert(c *C) {
 	c.Assert(account.Balance, Equals, 300)
 
 	ops[0].Id = 1
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	err = s.accounts.FindId(1).One(&account)
@@ -186,7 +186,7 @@ func (s *S) TestInsertStructID(c *C) {
 		Insert: M{"balance": 800},
 	}}
 
-	err := s.runner.Run(ops, "")
+	err := s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	n, err := s.accounts.Find(nil).Count()
@@ -204,7 +204,7 @@ func (s *S) TestRemove(c *C) {
 		Remove: true,
 	}}
 
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	err = s.accounts.FindId(0).One(nil)
@@ -212,7 +212,7 @@ func (s *S) TestRemove(c *C) {
 
 	// Removing a non-existing doc does not abort the transaction,
 	// so we preserve the behavior.
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 }
 
@@ -229,7 +229,7 @@ func (s *S) TestUpdate(c *C) {
 		Update: M{"$inc": M{"balance": 100}},
 	}}
 
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	var account Account
@@ -253,7 +253,7 @@ func (s *S) TestInsertUpdate(c *C) {
 		Update: M{"$inc": M{"balance": 100}},
 	}}
 
-	err := s.runner.Run(ops, "")
+	err := s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	var account Account
@@ -266,7 +266,7 @@ func (s *S) TestInsertUpdate(c *C) {
 	// was causing the Update to happen, ignoring the invalid Insert.
 	// We no longer treat Insert as a no-op, so we don't
 	// run the Update.
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, Equals, txn.ErrAborted)
 
 	err = s.accounts.FindId(0).One(&account)
@@ -288,7 +288,7 @@ func (s *S) TestUpdateInsert(c *C) {
 		Insert: M{"balance": 200},
 	}}
 
-	err := s.runner.Run(ops, "")
+	err := s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	var account Account
@@ -296,7 +296,7 @@ func (s *S) TestUpdateInsert(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(account.Balance, Equals, 200)
 
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	err = s.accounts.FindId(0).One(&account)
@@ -319,7 +319,7 @@ func (s *S) TestInsertRemoveInsert(c *C) {
 		Insert: M{"_id": 0, "balance": 300},
 	}}
 
-	err := s.runner.Run(ops, "")
+	err := s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	var account Account
@@ -359,7 +359,7 @@ func (s *S) TestErrors(c *C) {
 	txn.SetChaos(txn.Chaos{KillChance: 1.0})
 	for _, op := range tests {
 		c.Logf("op: %v", op)
-		err := s.runner.Run([]txn.Op{op}, "")
+		err := s.runner.Run([]txn.Op{op}, "", nil)
 		c.Assert(err, ErrorMatches, "error in transaction op 0: .*")
 	}
 }
@@ -372,7 +372,7 @@ func (s *S) TestAssertRefusesUpdate(c *C) {
 		Assert: bson.D{{"balance", 200}},
 		Update: bson.D{{"$inc", bson.D{{"balance", 100}}}},
 	}}
-	c.Assert(s.runner.Run(ops, ""), Equals, txn.ErrAborted)
+	c.Assert(s.runner.Run(ops, "", nil), Equals, txn.ErrAborted)
 	var account Account
 	c.Assert(s.accounts.FindId(0).One(&account), IsNil)
 	c.Assert(account.Balance, Equals, 100)
@@ -390,7 +390,7 @@ func (s *S) TestAssertNestedOr(c *C) {
 		Update: bson.D{{"$inc", bson.D{{"balance", 100}}}},
 	}}
 
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	var account Account
@@ -398,7 +398,7 @@ func (s *S) TestAssertNestedOr(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(account.Balance, Equals, 200)
 
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, Equals, txn.ErrAborted)
 
 	ops2 := []txn.Op{{
@@ -407,11 +407,11 @@ func (s *S) TestAssertNestedOr(c *C) {
 		Assert: bson.D{{"balance", 200}},
 		Update: bson.D{{"$set", bson.D{{"balance", 300}}}},
 	}}
-	err = s.runner.Run(ops2, "")
+	err = s.runner.Run(ops2, "", nil)
 	c.Assert(err, IsNil)
 
 	// Now that we're at 300, the original ops should apply again
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	err = s.accounts.FindId(0).One(&account)
@@ -427,7 +427,7 @@ func (s *S) TestInsertInvalidAssert(c *C) {
 		Insert: bson.D{{"balance", 100}},
 	}}
 
-	err := s.runner.Run(ops, "")
+	err := s.runner.Run(ops, "", nil)
 	c.Assert(err, ErrorMatches, `Insert can only Assert txn.DocMissing not \[\{balance 100\}\]`)
 
 	ops = []txn.Op{{
@@ -437,7 +437,7 @@ func (s *S) TestInsertInvalidAssert(c *C) {
 		Insert: bson.D{{"balance", 100}},
 	}}
 
-	err = s.runner.Run(ops, "")
+	err = s.runner.Run(ops, "", nil)
 	c.Assert(err, ErrorMatches, "Insert can only Assert txn.DocMissing not txn.DocExists")
 }
 
@@ -451,7 +451,7 @@ func (s *S) TestVerifyFieldOrdering(c *C) {
 		Insert: fields,
 	}}
 
-	err := s.runner.Run(ops, "")
+	err := s.runner.Run(ops, "", nil)
 	c.Assert(err, IsNil)
 
 	var d bson.D
@@ -496,7 +496,7 @@ func (s *S) TestChangeLog(c *C) {
 		Insert: M{"accounts": []int64{0, 1}},
 	}}
 	id := bson.NewObjectId()
-	err := s.runner.Run(ops, id)
+	err := s.runner.Run(ops, id, nil)
 	c.Assert(err, IsNil)
 
 	type IdList []interface{}
@@ -522,7 +522,7 @@ func (s *S) TestChangeLog(c *C) {
 		Update: M{"$inc": M{"balance": 100}},
 	}}
 	id = bson.NewObjectId()
-	err = s.runner.Run(ops, id)
+	err = s.runner.Run(ops, id, nil)
 	c.Assert(err, IsNil)
 
 	m = nil
@@ -542,7 +542,7 @@ func (s *S) TestChangeLog(c *C) {
 		Remove: true,
 	}}
 	id = bson.NewObjectId()
-	err = s.runner.Run(ops, id)
+	err = s.runner.Run(ops, id, nil)
 	c.Assert(err, IsNil)
 
 	m = nil
@@ -591,7 +591,7 @@ func (s *S) TestInsertStressTest(c *C) {
 							"added-by": i,
 						},
 					}}
-					err := runner.Run(ops, "")
+					err := runner.Run(ops, "", nil)
 					if err != txn.ErrAborted {
 						c.Check(err, IsNil)
 					}
