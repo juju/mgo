@@ -23,12 +23,13 @@ func TestAll(t *testing.T) {
 var fast = flag.Bool("fast", false, "Skip slow tests")
 
 type S struct {
-	server   dbtest.DBServer
-	session  *mgo.Session
-	db       *mgo.Database
-	txnlog   *mgo.Collection
-	accounts *mgo.Collection
-	runner   *sstxn.Runner
+	server          dbtest.DBServer
+	externalSession *mgo.Session
+	session         *mgo.Session
+	db              *mgo.Database
+	txnlog          *mgo.Collection
+	accounts        *mgo.Collection
+	runner          *sstxn.Runner
 }
 
 var _ = Suite(&S{})
@@ -78,15 +79,25 @@ func (t *testLogger) logf(level, message string, args ...interface{}) {
 }
 
 func (s *S) SetUpTest(c *C) {
+	c.Logf("wiping db server")
 	s.server.Wipe()
 
-	// txn.SetChaos(txn.Chaos{})
-	// txn.SetLogger(c)
-	// txn.SetDebug(true)
-
-	s.session = s.server.Session()
+	// Check if someone already has done 'make startdb'. If they have,
+	// then we will use the HA mongo with a replicaset, since it
+	// takes much less time to clean it up than to start a new replicaset.
+	// If they don't then we'll run our own server.
+	session, err := mgo.Dial("localhost:40011")
+	if err == nil {
+		c.Logf("using existing database at: %v", session.LiveServers())
+		s.externalSession = session.Copy()
+		s.session = session
+	} else {
+		c.Logf("unable to connect to :40011 using local server: %v", err)
+		s.session = s.server.Session()
+	}
 	build, err := s.session.BuildInfo()
 	c.Assert(err, IsNil)
+
 	if !build.VersionAtLeast(4, 0) {
 		// Skip in SetUpTest means TearDownTest won't be run.
 		s.session.Close()
@@ -101,6 +112,24 @@ func (s *S) SetUpTest(c *C) {
 
 func (s *S) TearDownTest(c *C) {
 	s.session.Close()
+	s.server.Wipe()
+	if s.externalSession != nil {
+		names, err := s.externalSession.DatabaseNames()
+		if err != nil {
+			panic(err)
+		}
+		for _, name := range names {
+			switch name {
+			case "admin", "local", "config":
+			default:
+				err = s.externalSession.DB(name).DropDatabase()
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+		s.externalSession.Close()
+	}
 }
 
 type Account struct {
@@ -557,19 +586,15 @@ func (s *S) TestInsertStressTest(c *C) {
 	if *fast {
 		c.Skip("-fast was supplied and this test is slow")
 	}
-	// TODO: implement Chaos
-	// txn.SetChaos(txn.Chaos{
-	// 	SlowdownChance: 0.3,
-	// 	Slowdown:       50 * time.Millisecond,
-	// })
-	// defer txn.SetChaos(txn.Chaos{})
 
 	// So we can run more iterations of the test in less time.
 	txn.SetDebug(false)
 
-	const runners = 10
-	const inserts = 10
-	const repeat = 100
+	const (
+		runners = 10
+		inserts = 10
+		repeat  = 100
+	)
 
 	logger := &testLogger{c}
 	for r := 0; r < repeat; r++ {
@@ -600,4 +625,169 @@ func (s *S) TestInsertStressTest(c *C) {
 		}
 		wg.Wait()
 	}
+}
+
+func (s *S) TestConcurrentUpdateTest(c *C) {
+	txn.SetDebug(false)
+	const (
+		concurrent = 10
+		count      = 10
+	)
+	s.accounts.Insert(bson.M{
+		"_id":     0,
+		"balance": 1,
+	})
+	var wg sync.WaitGroup
+	wg.Add(concurrent)
+	for i := 0; i < concurrent; i++ {
+		go func(i int, session *mgo.Session) {
+			defer wg.Done()
+			defer session.Close()
+			for j := 0; j < count; j++ {
+				db := session.DB("test")
+				runner := sstxn.NewRunner(db, &testLogger{c})
+				err := runner.Run([]txn.Op{{
+					C:      "accounts",
+					Id:     0,
+					Assert: txn.DocExists,
+					Update: bson.M{"$inc": bson.M{"balance": 1}},
+				}}, "", nil)
+				c.Logf("routine %d: attempt: %d Update: %v", i, j, err)
+				if err != nil {
+					c.Check(err, Equals, txn.ErrAborted)
+				}
+			}
+		}(i, s.session.Copy())
+	}
+	wg.Wait()
+}
+
+func (s *S) TestConcurrentInsertPreAssertFailure(c *C) {
+	logger := &testLogger{c}
+	runner1 := sstxn.NewRunner(s.db, logger)
+	session2 := s.session.Copy()
+	defer session2.Close()
+	runner2 := sstxn.NewRunner(s.db.With(session2), logger)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: txn.DocMissing,
+		Insert: bson.M{"foo": "bar"},
+	}}
+	runner1.SetStartHook(func() {
+		err := runner2.Run(ops, "", nil)
+		c.Check(err, IsNil)
+	})
+	err := runner1.Run(ops, "", nil)
+	c.Check(err, Equals, txn.ErrAborted)
+}
+
+func (s *S) TestConcurrentInsertPostAssertFailure(c *C) {
+	logger := &testLogger{c}
+	runner1 := sstxn.NewRunner(s.db, logger)
+	session2 := s.session.Copy()
+	defer session2.Close()
+	runner2 := sstxn.NewRunner(s.db.With(session2), logger)
+	ops := []txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: txn.DocMissing,
+		Insert: bson.M{"foo": "bar"},
+	}}
+	runner1.SetPostAssertHook(func() {
+		err := runner2.Run(ops, "", nil)
+		c.Check(err, IsNil)
+	})
+	err := runner1.Run(ops, "", nil)
+	c.Check(err, Equals, txn.ErrAborted)
+}
+
+func (s *S) TestConcurrentUpdatePreAssertFailure(c *C) {
+	logger := &testLogger{c}
+	runner1 := sstxn.NewRunner(s.db, logger)
+	session2 := s.session.Copy()
+	defer session2.Close()
+	runner2 := sstxn.NewRunner(s.db.With(session2), logger)
+	runner1.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: txn.DocMissing,
+		Insert: bson.M{"balance": 0},
+	}}, "", nil)
+	runner1.SetStartHook(func() {
+		err := runner2.Run([]txn.Op{{
+			C:      "accounts",
+			Id:     0,
+			Assert: txn.DocExists,
+			Update: bson.M{"$set": bson.M{"balance": 1}},
+		}}, "", nil)
+		c.Check(err, IsNil)
+	})
+	err := runner1.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: bson.M{"balance": 0},
+		Update: bson.M{"$inc": bson.M{"balance": 1}},
+	}}, "", nil)
+	c.Assert(err, Equals, txn.ErrAborted)
+}
+
+func (s *S) TestConcurrentUpdatePostAssertFailure(c *C) {
+	logger := &testLogger{c}
+	runner1 := sstxn.NewRunner(s.db, logger)
+	session2 := s.session.Copy()
+	defer session2.Close()
+	runner2 := sstxn.NewRunner(s.db.With(session2), logger)
+	runner1.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: txn.DocMissing,
+		Insert: bson.M{"balance": 0},
+	}}, "", nil)
+	runner1.SetPostAssertHook(func() {
+		err := runner2.Run([]txn.Op{{
+			C:      "accounts",
+			Id:     0,
+			Assert: txn.DocExists,
+			Update: bson.M{"$set": bson.M{"balance": 1}},
+		}}, "", nil)
+		c.Check(err, IsNil)
+	})
+	err := runner1.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: bson.M{"balance": 0},
+		Update: bson.M{"$inc": bson.M{"balance": 1}},
+	}}, "", nil)
+	c.Assert(err, Equals, txn.ErrAborted)
+}
+
+func (s *S) TestConcurrentRemoveUpdatePostAssertFailure(c *C) {
+	// If you update before we remove, the remove is aborted
+	logger := &testLogger{c}
+	runner1 := sstxn.NewRunner(s.db, logger)
+	session2 := s.session.Copy()
+	defer session2.Close()
+	runner2 := sstxn.NewRunner(s.db.With(session2), logger)
+	runner1.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Assert: txn.DocMissing,
+		Insert: bson.M{"balance": 0},
+	}}, "", nil)
+	runner1.SetPostAssertHook(func() {
+		err := runner2.Run([]txn.Op{{
+			C:      "accounts",
+			Id:     0,
+			Assert: txn.DocExists,
+			Update: bson.M{"$inc": bson.M{"balance": 1}},
+		}}, "", nil)
+		c.Check(err, IsNil)
+	})
+	err := runner1.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Remove: true,
+	}}, "", nil)
+	c.Assert(err, Equals, txn.ErrAborted)
 }

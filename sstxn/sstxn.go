@@ -56,9 +56,11 @@ var _ Logger = nilLogger{}
 // A Runner applies operations as part of a transaction onto any number
 // of collections within a database. See the Run method for details.
 type Runner struct {
-	db            *mgo.Database
-	logCollection *mgo.Collection // log
-	logger        Logger
+	db             *mgo.Database
+	logCollection  *mgo.Collection // log
+	logger         Logger
+	startHook      func()
+	postAssertHook func()
 }
 
 // NewRunner returns a new transaction runner that uses tc to hold its
@@ -141,9 +143,15 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err erro
 			}
 		}
 	}()
+	if r.startHook != nil {
+		r.startHook()
+	}
 	var revnos []int64
 	if revnos, err = r.checkAsserts(ops); err != nil {
 		return err
+	}
+	if r.postAssertHook != nil {
+		r.postAssertHook()
 	}
 	if err = r.applyOps(ops, revnos); err != nil {
 		return err
@@ -316,6 +324,10 @@ func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
 	if err == nil {
 		// happy path
 		return nil
+	} else if mgo.IsDup(err) || IsWriteConflict(err) {
+		// This has triggered a server-side abort, so make sure the user
+		// understands the txn is aborted
+		return txn.ErrAborted
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
 		return err
@@ -371,8 +383,10 @@ func (r *Runner) applyRemove(op txn.Op, revno *int64) error {
 		// happy path
 		// note that removing a non-existing object does *not* abort the transaction
 		return nil
+	} else if IsWriteConflict(err) {
+		// Translate WriteConflict into ErrAborted
+		return txn.ErrAborted
 	} else {
-		// XXX: mgo.ErrNotFound is probably a no-op?
 		r.logger.Tracef("op %#v error: %v", op, err)
 		return err
 	}
@@ -437,4 +451,16 @@ func (r *Runner) ChangeLog(logc *mgo.Collection) {
 // ResumeAll is a no-op on server-side transactions because there is nothing to resume.
 func (r *Runner) ResumeAll() error {
 	return nil
+}
+
+// SetStartHook will call func() as soon as StartTransaction is called.
+// This can be used to play games before the Assert check.
+func (r *Runner) SetStartHook(hook func()) {
+	r.startHook = hook
+}
+
+// SetPostAssertHook will call func() after we have done Assertions, but
+// before we actually make any database changes.
+func (r *Runner) SetPostAssertHook(hook func()) {
+	r.postAssertHook = hook
 }
