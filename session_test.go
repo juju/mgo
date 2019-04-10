@@ -1345,8 +1345,8 @@ func (s *S) TestQueryComment(c *C) {
 		commentField = "command.comment"
 		nField = "command.filter.n"
 	} else if s.versionAtLeast(3, 2) {
-			commentField = "query.comment"
-			nField = "query.filter.n"
+		commentField = "query.comment"
+		nField = "query.filter.n"
 	}
 	n, err := session.DB("mydb").C("system.profile").Find(bson.M{nField: 41, commentField: "some comment"}).Count()
 	c.Assert(err, IsNil)
