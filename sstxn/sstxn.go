@@ -104,7 +104,7 @@ func NewRunner(db *mgo.Database, logger Logger) *Runner {
 //
 // Any number of transactions may be run concurrently, with one
 // runner or many.
-func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err error) {
+func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) error {
 	const efmt = "error in transaction op %d: %s"
 	for i := range ops {
 		op := &ops[i]
@@ -132,7 +132,7 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err erro
 		id = bson.NewObjectId()
 	}
 	completed := false
-	if err = r.db.Session.StartTransaction(); err != nil {
+	if err := r.db.Session.StartTransaction(); err != nil {
 		return err
 	}
 	defer func() {
@@ -147,19 +147,21 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err erro
 		r.startHook()
 	}
 	var revnos []int64
-	if revnos, err = r.checkAsserts(ops); err != nil {
+	if revs, err := r.checkAsserts(ops); err != nil {
 		return err
+	} else {
+		revnos = revs
 	}
 	if r.postAssertHook != nil {
 		r.postAssertHook()
 	}
-	if err = r.applyOps(ops, revnos); err != nil {
+	if err := r.applyOps(ops, revnos); err != nil {
 		return err
 	}
-	if err = r.updateLog(ops, revnos, id); err != nil {
+	if err := r.updateLog(ops, revnos, id); err != nil {
 		return err
 	}
-	if err = r.db.Session.CommitTransaction(); err != nil {
+	if err := r.db.Session.CommitTransaction(); err != nil {
 		return err
 	}
 	completed = true
@@ -174,17 +176,16 @@ type revnoDoc struct {
 }
 
 func (r *Runner) checkAsserts(ops []txn.Op) ([]int64, error) {
-	// XXX: users of this API should have already read the documents and
-	// built their changes on it. Thus we shouldn't have to redo assertions
-	// here, which would let us avoid re-reading the documents.
-	// What we really want is for the TXN to live for the lifetime of the buildTxn function.
-	// So that once the build starts, we can ensure that the documents are read
-	// as part of the transaction, and that they won't be changing during the
-	// lifetime of all of those documents that are read.
-
-	// That said... if we are going to do assertion checking, we might as well
-	// read the revnos, because most of the docs should have an Assert, so we
-	// have to read them anyway.
+	// TODO(jam): 2019-04-10 users of this API should have already read the
+	//  documents and built their changes on it. Thus we shouldn't have to redo
+	//  assertions here, which would let us avoid re-reading the documents.
+	//  What we really want is for the TXN to live for the lifetime of the buildTxn function.
+	//  So that once the build starts, we can ensure that the documents are read
+	//  as part of the transaction, and that they won't be changing during the
+	//  lifetime of all of those documents that are read.
+	//  That said... if we are going to do assertion checking, we will read the
+	//  revnos, because most of the docs should have an Assert, so we
+	//  have to read them anyway. And this way we have the revnos for the txn.log
 	revnos := make([]int64, len(ops))
 	for i, op := range ops {
 		c := r.db.C(op.C)
@@ -261,7 +262,6 @@ func addToDoc(doc bson.D, name string, value bson.D) (bson.D, error) {
 				doc[i].Value = append(old, value...)
 				return doc, nil
 			} else {
-				// TODO: test this
 				return nil, fmt.Errorf("invalid %q value in change document: %#v", name, doc[i].Value)
 			}
 		}
@@ -302,19 +302,12 @@ func (r *Runner) applyOps(ops []txn.Op, revnos []int64) error {
 }
 
 func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
-	// XXX: do we need to track the revno of the doc from the time we did the Assert
-	// until we do this update? I'm hoping we don't as that is the point of
-	// using a server Transaction.
 	c := r.db.C(op.C)
 	r.logger.Tracef("update op: %#v", op)
 	d, err := objToDoc(op.Update)
 	if err != nil {
-		// TODO: Test unmarshallable Update
 		return err
 	}
-	// Note: Mongo will accept this being passed in as an extra entry in d.
-	// We don't *have* to put it in the same "$inc" section. Might be nicer
-	// to be appending the content at the end.
 	*revno++
 	d, err = addToDoc(d, "$set", bson.D{{"txn-revno", *revno}})
 	if err != nil {
@@ -347,13 +340,8 @@ func IsWriteConflict(err error) bool {
 func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	c := r.db.C(op.C)
 	r.logger.Tracef("inserting op: %#v", op)
-	// XXX: Do we need a txns.stash? Without one,
-	// Remove is permanent, and Insert won't create a doc with a greater revno
-	// However, txn pruner destroys objects in the stash anyway, and
-	// things still seem to work, so we probably don't
 	d, err := objToDoc(op.Insert)
 	if err != nil {
-		// TODO: Test unmarshallable Insert
 		return err
 	}
 	d = setInDoc(d, "_id", op.Id)
@@ -396,13 +384,6 @@ func (r *Runner) updateLog(ops []txn.Op, revnos []int64, txnId bson.ObjectId) er
 	if r.logCollection == nil {
 		return nil
 	}
-	// TODO: we could determine the revno a cheaper way. Rather than reading all
-	//  the docs after we updated them, we could use somethnig like Apply to update
-	//  the documents and read back what the new revno is. Or we could read it
-	//  during the Assert stage and assert that it is going to the value we want
-	//  it to go to instead of using $inc.
-	//  This code causes us to reread all the documents we just wrote,
-	//  which isn't great.
 	logDoc := bson.D{{Name: "_id", Value: txnId}}
 	for i, op := range ops {
 		if op.Insert == nil && op.Update == nil && !op.Remove {

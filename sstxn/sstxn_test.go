@@ -769,12 +769,13 @@ func (s *S) TestConcurrentRemoveUpdatePostAssertFailure(c *C) {
 	session2 := s.session.Copy()
 	defer session2.Close()
 	runner2 := sstxn.NewRunner(s.db.With(session2), logger)
-	runner1.Run([]txn.Op{{
+	err := runner1.Run([]txn.Op{{
 		C:      "accounts",
 		Id:     0,
 		Assert: txn.DocMissing,
 		Insert: bson.M{"balance": 0},
 	}}, "", nil)
+	c.Assert(err, IsNil)
 	runner1.SetPostAssertHook(func() {
 		err := runner2.Run([]txn.Op{{
 			C:      "accounts",
@@ -784,10 +785,56 @@ func (s *S) TestConcurrentRemoveUpdatePostAssertFailure(c *C) {
 		}}, "", nil)
 		c.Check(err, IsNil)
 	})
-	err := runner1.Run([]txn.Op{{
+	err = runner1.Run([]txn.Op{{
 		C:      "accounts",
 		Id:     0,
 		Remove: true,
 	}}, "", nil)
 	c.Assert(err, Equals, txn.ErrAborted)
+}
+
+type NotMarshallable struct {
+	Error error
+}
+
+func (u NotMarshallable) GetBSON() (interface{}, error) {
+	return nil, u.Error
+}
+
+func (u NotMarshallable) SetBSON(raw bson.Raw) error {
+	return u.Error
+}
+
+func (s *S) TestNotMarshallableUpdate(c *C) {
+	err := s.accounts.Insert(bson.D{{"_id", 0}, {"balance", 300}})
+	c.Assert(err, IsNil)
+	logger := &testLogger{c}
+	runner := sstxn.NewRunner(s.db, logger)
+	err = runner.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Update: NotMarshallable{Error: fmt.Errorf("cannot marshall for update")},
+	}}, "", nil)
+	c.Assert(err, NotNil)
+	c.Check(err, ErrorMatches, "cannot marshall for update")
+	var raw bson.D
+	err = s.accounts.FindId(0).One(&raw)
+	c.Assert(err, IsNil)
+	// Make sure the content hasn't been changed
+	c.Check(raw, DeepEquals, bson.D{{"_id", 0}, {"balance", 300}})
+}
+
+func (s *S) TestNotMarshallableInsert(c *C) {
+	logger := &testLogger{c}
+	runner := sstxn.NewRunner(s.db, logger)
+	err := runner.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     0,
+		Insert: NotMarshallable{Error: fmt.Errorf("cannot marshall for insert")},
+	}}, "", nil)
+	c.Assert(err, NotNil)
+	c.Check(err, ErrorMatches, "cannot marshall for insert")
+	var raw bson.D
+	err = s.accounts.FindId(0).One(&raw)
+	c.Check(err, Equals, mgo.ErrNotFound)
 }
