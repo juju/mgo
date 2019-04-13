@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/tomb.v2"
 )
 
@@ -27,6 +28,7 @@ type DBServer struct {
 	output  bytes.Buffer
 	server  *exec.Cmd
 	dbpath  string
+	replset string
 	host    string
 	tomb    tomb.Tomb
 }
@@ -36,6 +38,15 @@ type DBServer struct {
 // by the test helper.
 func (dbs *DBServer) SetPath(dbpath string) {
 	dbs.dbpath = dbpath
+}
+
+// EnableReplicaset must be called before the database is started. It will
+// start the server with '--replSet=<name>' and then call rs.initiate() once
+// the server is up and running. Note that mongod startup time is significantly
+// slower in replSet mode, but it is necessary for some things like Transaction
+// support.
+func (dbs *DBServer) EnableReplicaset(name string) {
+	dbs.replset = name
 }
 
 func (dbs *DBServer) start() {
@@ -61,7 +72,11 @@ func (dbs *DBServer) start() {
 		"--nssize", "1",
 		"--noprealloc",
 		"--smallfiles",
-		"--nojournal",
+	}
+	if dbs.replset != "" {
+		args = append(args, fmt.Sprintf("--replSet=%s", dbs.replset))
+	} else {
+		args = append(args, "--nojournal")
 	}
 	dbs.tomb = tomb.Tomb{}
 	dbs.server = exec.Command("mongod", args...)
@@ -72,6 +87,9 @@ func (dbs *DBServer) start() {
 		panic(err)
 	}
 	dbs.tomb.Go(dbs.monitor)
+	if dbs.replset != "" {
+		dbs.initiateRepl()
+	}
 	dbs.Wipe()
 }
 
@@ -91,6 +109,28 @@ func (dbs *DBServer) monitor() error {
 		panic("mongod process died unexpectedly")
 	}
 	return nil
+}
+
+func (dbs *DBServer) initiateRepl() {
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs:    []string{dbs.host},
+		Direct:   true, // must do Direct=true when dealing with a replicaset
+		Timeout:  10 * time.Second,
+		Database: "test",
+		// We don't set ReplicaSetName here, because the replicaset hasn't actually
+		// been initialized yet.
+		// ReplicaSetName: dbs.replset,
+	})
+	if err == nil {
+		defer session.Close()
+		session.SetMode(mgo.Monotonic, true)
+		err := session.Run(bson.D{{Name: "replSetInitiate", Value: nil}}, nil)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		panic(err)
+	}
 }
 
 // Stop stops the test server process, if it is running.
