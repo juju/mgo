@@ -320,6 +320,7 @@ func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
 	} else if mgo.IsDup(err) || IsWriteConflict(err) {
 		// This has triggered a server-side abort, so make sure the user
 		// understands the txn is aborted
+		r.logger.Tracef("update op: %#v aborted: %v", op, err)
 		return txn.ErrAborted
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
@@ -347,6 +348,7 @@ func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	d = setInDoc(d, "_id", op.Id)
 	d = setInDoc(d, "txn-revno", 2)
 	*revno = 2
+	r.logger.Tracef("inserting d: %#v", d)
 	err = c.Insert(d)
 	if err == nil {
 		// happy path
@@ -354,6 +356,7 @@ func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	} else if mgo.IsDup(err) || IsWriteConflict(err) {
 		// This has triggered a server-side abort, so make sure the user
 		// understands the txn is aborted
+		r.logger.Tracef("insert op: %#v aborted: %v", op, err)
 		return txn.ErrAborted
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
@@ -373,6 +376,7 @@ func (r *Runner) applyRemove(op txn.Op, revno *int64) error {
 		return nil
 	} else if IsWriteConflict(err) {
 		// Translate WriteConflict into ErrAborted
+		r.logger.Tracef("remove op: %#v aborted: %v", op, err)
 		return txn.ErrAborted
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
