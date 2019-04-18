@@ -838,3 +838,23 @@ func (s *S) TestNotMarshallableInsert(c *C) {
 	err = s.accounts.FindId(0).One(&raw)
 	c.Check(err, Equals, mgo.ErrNotFound)
 }
+
+type testStruct struct {
+	DocID string `bson:"_id"`
+	Value string `bson:"value"`
+}
+
+func (s *S) TestInsertValueFromStructForcedID(c *C) {
+	// If someone only sets the Value part of a document, we still want to make
+	// sure the _id of the inserted document is correct.
+	c.Assert(s.runner.Run([]txn.Op{{
+		C:      "accounts",
+		Id:     "1",
+		Assert: txn.DocMissing,
+		Insert: testStruct{Value: "value"},
+	}}, "", nil), IsNil)
+	var res testStruct
+	c.Assert(s.accounts.FindId("1").One(&res), IsNil)
+	c.Check(res.DocID, Equals, "1")
+	c.Check(res.Value, Equals, "value")
+}
