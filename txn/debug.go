@@ -5,27 +5,50 @@ import (
 	"fmt"
 	"sort"
 	"sync/atomic"
+	"unsafe"
 
 	"gopkg.in/mgo.v2/bson"
 )
 
 var (
-	debugEnabled bool
-	logger       log_Logger
+	// To ensure goroutine safety, use the getter
+	// and setter methods below to access these.
+	logger       unsafe.Pointer
+	debugEnabled uint32
 )
 
 type log_Logger interface {
 	Output(calldepth int, s string) error
 }
 
-// Specify the *log.Logger where logged messages should be sent to.
+// Specify the *log.Logger object where log messages should be sent to.
 func SetLogger(l log_Logger) {
-	logger = l
+	if l == nil {
+		atomic.StorePointer(&logger, nil)
+		return
+	}
+	atomic.StorePointer(&logger, unsafe.Pointer(&l))
 }
 
-// SetDebug enables or disables debugging.
+func getLogger() log_Logger {
+	if loggerPtr := (*log_Logger)(atomic.LoadPointer(&logger)); loggerPtr != nil {
+		return *loggerPtr
+	}
+	return nil
+}
+
+// Enable the delivery of debug messages to the logger.  Only meaningful
+// if a logger is also set.
 func SetDebug(debug bool) {
-	debugEnabled = debug
+	value := uint32(0)
+	if debug {
+		value = 1
+	}
+	atomic.StoreUint32(&debugEnabled, value)
+}
+
+func getDebug() bool {
+	return atomic.LoadUint32(&debugEnabled) != 0
 }
 
 var ErrChaos = fmt.Errorf("interrupted by chaos")
@@ -46,13 +69,13 @@ func debugPrefix() string {
 }
 
 func logf(format string, args ...interface{}) {
-	if logger != nil {
+	if logger := getLogger(); logger != nil {
 		logger.Output(2, fmt.Sprintf(format, argsForLog(args)...))
 	}
 }
 
 func debugf(format string, args ...interface{}) {
-	if debugEnabled && logger != nil {
+	if logger := getLogger(); logger != nil && getDebug() {
 		logger.Output(2, fmt.Sprintf(format, argsForLog(args)...))
 	}
 }
