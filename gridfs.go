@@ -36,7 +36,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/juju/mgo/v2/bson"
 )
 
 type GridFS struct {

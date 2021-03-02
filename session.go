@@ -41,7 +41,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/juju/mgo/v2/bson"
 )
 
 type Mode int
@@ -3335,11 +3335,13 @@ func (db *Database) run(socket *mongoSocket, cmd, result interface{}) (err error
 			debugf("Run command unmarshaling failed: %#v %v", op, err)
 			return err
 		}
-		if globalDebug && globalLogger != nil {
+		debugFunc(func() string {
 			var res bson.M
-			bson.Unmarshal(data, &res)
-			debugf("Run command unmarshaled: %#v, result: %#v", op, res)
-		}
+			if err := bson.Unmarshal(data, &res); err != nil {
+				return ""
+			}
+			return fmt.Sprintf("Run command unmarshaled: %#v, result: %#v", op, res)
+		})
 	}
 	return checkQueryError(op.collection, data)
 }

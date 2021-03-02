@@ -3,8 +3,8 @@ package txn
 import (
 	"fmt"
 
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
+	"github.com/juju/mgo/v2"
+	"github.com/juju/mgo/v2/bson"
 )
 
 func flush(r *Runner, t *transaction) error {
@@ -130,9 +130,7 @@ func (f *flusher) run() (err error) {
 	// cycles at once. The order in which transactions are applied
 	// in commonly affected documents must be a global agreement.
 	sorted := tarjanSort(successors)
-	if debugEnabled {
-		f.debugf("Tarjan output: %v", sorted)
-	}
+	debugf("Tarjan output: %v", sorted)
 	pull := make(map[bson.ObjectId]*transaction)
 	for i := len(sorted) - 1; i >= 0; i-- {
 		scc := sorted[i]
@@ -711,13 +709,13 @@ func (f *flusher) abortOrReload(t *transaction, revnos []int64, pull map[bson.Ob
 
 func (f *flusher) checkpoint(t *transaction, revnos []int64) error {
 	var debugRevnos map[docKey][]int64
-	if debugEnabled {
+	if getDebug() {
 		debugRevnos = make(map[docKey][]int64)
 		for i, op := range t.Ops {
 			dkey := op.docKey()
 			debugRevnos[dkey] = append(debugRevnos[dkey], revnos[i])
 		}
-		f.debugf("Ready to apply %s. Saving revnos %v", t, debugRevnos)
+		debugf("Ready to apply %s. Saving revnos %v", t, debugRevnos)
 	}
 
 	// Save in t the txn-revno values the transaction must run on.
@@ -755,11 +753,8 @@ func (f *flusher) apply(t *transaction, pull map[bson.ObjectId]*transaction) err
 		dqueue := f.queue[dkey]
 		revno := t.Revnos[i]
 
-		var opName string
-		if debugEnabled {
-			opName = op.name()
-			f.debugf("Applying %s op %d (%s) on %v with txn-revno %d", t, i, opName, dkey, revno)
-		}
+		opName := op.name()
+		f.debugf("Applying %s op %d (%s) on %v with txn-revno %d", t, i, opName, dkey, revno)
 
 		c := f.tc.Database.C(op.C)
 
@@ -914,9 +909,7 @@ func (f *flusher) apply(t *transaction, pull map[bson.ObjectId]*transaction) err
 		} else {
 			outcome = err.Error()
 		}
-		if debugEnabled {
-			f.debugf("Applying %s op %d (%s) on %v with txn-revno %d: %s", t, i, opName, dkey, revno, outcome)
-		}
+		f.debugf("Applying %s op %d (%s) on %v with txn-revno %d: %s", t, i, opName, dkey, revno, outcome)
 		if err != nil {
 			return err
 		}
@@ -1048,8 +1041,5 @@ func hasToken(tokens []token, tt token) bool {
 }
 
 func (f *flusher) debugf(format string, args ...interface{}) {
-	if !debugEnabled {
-		return
-	}
 	debugf(f.debugId+format, args...)
 }

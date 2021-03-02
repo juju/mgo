@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/juju/mgo/v2/bson"
 )
 
 // ---------------------------------------------------------------------------
@@ -278,7 +278,10 @@ NextTagSet:
 	return false
 }
 
-var pingDelay = 15 * time.Second
+var (
+	pingDelay   = 15 * time.Second
+	globalMutex sync.Mutex
+)
 
 func (server *mongoServer) pinger(loop bool) {
 	var delay time.Duration

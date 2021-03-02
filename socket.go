@@ -33,7 +33,7 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/juju/mgo/v2/bson"
 )
 
 type replyFunc func(err error, reply *replyOp, docNum int, docData []byte)
@@ -616,12 +616,13 @@ func (socket *mongoSocket) readLoop() {
 					return
 				}
 
-				if globalDebug && globalLogger != nil {
+				debugFunc(func() string {
 					m := bson.M{}
-					if err := bson.Unmarshal(b, m); err == nil {
-						debugf("Socket %p to %s: received document: %#v", socket, socket.addr, m)
+					if err := bson.Unmarshal(b, m); err != nil {
+						return ""
 					}
-				}
+					return fmt.Sprintf("Socket %p to %s: received document: %#v", socket, socket.addr, m)
+				})
 
 				if replyFunc != nil {
 					replyFunc(nil, &reply, i, b)
