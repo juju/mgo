@@ -34,8 +34,8 @@ import (
 	"fmt"
 	"sync"
 
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2/internal/scram"
+	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v2/internal/scram"
 )
 
 type authCmd struct {

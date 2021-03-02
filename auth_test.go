@@ -38,8 +38,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/mgo/v2"
 	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2"
 )
 
 // failedAuthRegex covers the various messages that Mongo gives from different versions

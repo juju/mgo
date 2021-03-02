@@ -1,4 +1,4 @@
-// The txn package implements support for multi-document transactions.
+// Package txn implements support for multi-document transactions.
 //
 // For details check the following blog post:
 //
@@ -7,18 +7,17 @@
 package txn
 
 import (
+	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	mrand "math/rand"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
-
-	crand "crypto/rand"
-	mrand "math/rand"
+	"github.com/juju/mgo/v2"
+	"github.com/juju/mgo/v2/bson"
 )
 
 type state int

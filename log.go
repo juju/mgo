@@ -28,7 +28,8 @@ package mgo
 
 import (
 	"fmt"
-	"sync"
+	"sync/atomic"
+	"unsafe"
 )
 
 // ---------------------------------------------------------------------------
@@ -42,76 +43,83 @@ type log_Logger interface {
 }
 
 var (
-	globalLogger log_Logger
-	globalDebug  bool
-	globalMutex  sync.Mutex
+	// To ensure goroutine safety, use the getter
+	// and setter methods below to access these.
+	globalLogger unsafe.Pointer
+	globalDebug  uint32
 )
-
-// RACE WARNING: There are known data races when logging, which are manually
-// silenced when the race detector is in use. These data races won't be
-// observed in typical use, because logging is supposed to be set up once when
-// the application starts. Having raceDetector as a constant, the compiler
-// should elide the locks altogether in actual use.
 
 // Specify the *log.Logger object where log messages should be sent to.
 func SetLogger(logger log_Logger) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	globalLogger = logger
+	if logger == nil {
+		atomic.StorePointer(&globalLogger, nil)
+		return
+	}
+	atomic.StorePointer(&globalLogger, unsafe.Pointer(&logger))
+}
+
+func getLogger() log_Logger {
+	if loggerPtr := (*log_Logger)(atomic.LoadPointer(&globalLogger)); loggerPtr != nil {
+		return *loggerPtr
+	}
+	return nil
 }
 
 // Enable the delivery of debug messages to the logger.  Only meaningful
 // if a logger is also set.
 func SetDebug(debug bool) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	globalDebug = debug
+	value := uint32(0)
+	if debug {
+		value = 1
+	}
+	atomic.StoreUint32(&globalDebug, value)
+}
+
+func getDebug() bool {
+	return atomic.LoadUint32(&globalDebug) != 0
 }
 
 func log(v ...interface{}) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	if globalLogger != nil {
-		globalLogger.Output(2, fmt.Sprint(v...))
+	if logger := getLogger(); logger != nil {
+		_ = logger.Output(2, fmt.Sprint(v...))
 	}
 }
 
 func logln(v ...interface{}) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	if globalLogger != nil {
-		globalLogger.Output(2, fmt.Sprintln(v...))
+	if logger := getLogger(); logger != nil {
+		_ = logger.Output(2, fmt.Sprintln(v...))
 	}
 }
 
 func logf(format string, v ...interface{}) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	if globalLogger != nil {
-		globalLogger.Output(2, fmt.Sprintf(format, v...))
+	if logger := getLogger(); logger != nil {
+		_ = logger.Output(2, fmt.Sprintf(format, v...))
 	}
 }
 
 func debug(v ...interface{}) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	if globalDebug && globalLogger != nil {
-		globalLogger.Output(2, fmt.Sprint(v...))
+	if logger := getLogger(); logger != nil && getDebug() {
+		_ = logger.Output(2, fmt.Sprint(v...))
 	}
 }
 
 func debugln(v ...interface{}) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	if globalDebug && globalLogger != nil {
-		globalLogger.Output(2, fmt.Sprintln(v...))
+	if logger := getLogger(); logger != nil && getDebug() {
+		_ = logger.Output(2, fmt.Sprintln(v...))
 	}
 }
 
 func debugf(format string, v ...interface{}) {
-	globalMutex.Lock()
-	defer globalMutex.Unlock()
-	if globalDebug && globalLogger != nil {
-		globalLogger.Output(2, fmt.Sprintf(format, v...))
+	if logger := getLogger(); logger != nil && getDebug() {
+		_ = logger.Output(2, fmt.Sprintf(format, v...))
+	}
+}
+
+func debugFunc(debugFunc func() string) {
+	if logger := getLogger(); logger != nil && getDebug() {
+		out := debugFunc()
+		if out != "" {
+			_ = logger.Output(2, out)
+		}
 	}
 }

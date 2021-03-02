@@ -26,9 +26,9 @@ package sstxn
 import (
 	"fmt"
 
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2/txn"
+	"github.com/juju/mgo/v2"
+	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v2/txn"
 )
 
 // Logger defines the types of logging that we will be doing
