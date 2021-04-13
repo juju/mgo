@@ -104,7 +104,7 @@ func NewRunner(db *mgo.Database, logger Logger) *Runner {
 //
 // Any number of transactions may be run concurrently, with one
 // runner or many.
-func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) error {
+func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err error) {
 	const efmt = "error in transaction op %d: %s"
 	for i := range ops {
 		op := &ops[i]
@@ -131,6 +131,25 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) error {
 	if id == "" {
 		id = bson.NewObjectId()
 	}
+
+	// Sometimes the mongo server will return an error code 112 (write conflict).
+	// This is a signal the transaction needs to be retried.
+	// We'll retry 3 times but not forever.
+	for i := 0; i < 3; i++ {
+		err = r.runTxn(ops, id)
+		if err == errWriteConflict {
+			r.logger.Tracef("attempt %d retrying txn ops", i)
+			continue
+		}
+		break
+	}
+	if err == errWriteConflict {
+		err = txn.ErrAborted
+	}
+	return err
+}
+
+func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 	completed := false
 	if err := r.db.Session.StartTransaction(); err != nil {
 		return err
@@ -317,7 +336,10 @@ func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
 	if err == nil {
 		// happy path
 		return nil
-	} else if mgo.IsDup(err) || IsWriteConflict(err) {
+	} else if IsWriteConflict(err) {
+		r.logger.Tracef("update op: %#v write conflict: %v", op, err)
+		return errWriteConflict
+	} else if mgo.IsDup(err) {
 		// This has triggered a server-side abort, so make sure the user
 		// understands the txn is aborted
 		r.logger.Tracef("update op: %#v aborted: %v", op, err)
@@ -329,7 +351,9 @@ func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
 }
 
 // IsWriteConflict checks if the supplied error is a Mongo WriteConflict error.
-// Indicating we had 2 transactions trying to write to the same document.
+// This usually indicates we had 2 transactions trying to write to the same document,
+// but is also possible when the server side needs the transaction to be retried due
+// to replica consistency issues.
 func IsWriteConflict(err error) bool {
 	if e, ok := err.(*mgo.QueryError); ok {
 		if e.Code == 112 {
@@ -338,6 +362,10 @@ func IsWriteConflict(err error) bool {
 	}
 	return false
 }
+
+// errWriteConflict is used when a server side write conflict error occurs.
+var errWriteConflict = fmt.Errorf("write conflict")
+
 func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	c := r.db.C(op.C)
 	r.logger.Tracef("inserting op: %#v", op)
@@ -353,7 +381,10 @@ func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	if err == nil {
 		// happy path
 		return nil
-	} else if mgo.IsDup(err) || IsWriteConflict(err) {
+	} else if IsWriteConflict(err) {
+		r.logger.Tracef("insert op: %#v write conflict: %v", op, err)
+		return errWriteConflict
+	} else if mgo.IsDup(err) {
 		// This has triggered a server-side abort, so make sure the user
 		// understands the txn is aborted
 		r.logger.Tracef("insert op: %#v aborted: %v", op, err)
@@ -375,9 +406,8 @@ func (r *Runner) applyRemove(op txn.Op, revno *int64) error {
 		// note that removing a non-existing object does *not* abort the transaction
 		return nil
 	} else if IsWriteConflict(err) {
-		// Translate WriteConflict into ErrAborted
-		r.logger.Tracef("remove op: %#v aborted: %v", op, err)
-		return txn.ErrAborted
+		r.logger.Tracef("remove op: %#v write conflict: %v", op, err)
+		return errWriteConflict
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
 		return err

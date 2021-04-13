@@ -69,9 +69,6 @@ func (dbs *DBServer) start() {
 		"--dbpath", dbs.dbpath,
 		"--bind_ip", "127.0.0.1",
 		"--port", strconv.Itoa(addr.Port),
-		"--nssize", "1",
-		"--noprealloc",
-		"--smallfiles",
 	}
 	if dbs.replset != "" {
 		args = append(args, fmt.Sprintf("--replSet=%s", dbs.replset))
