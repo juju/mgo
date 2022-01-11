@@ -10,6 +10,7 @@ fi
 
 exec mongod $COMMONDOPTSNOIP \
 	--shardsvr \
+	--replSet confdb1
 	--bind_ip=$BINDIP \
 	--port 40001 \
 	--ipv6

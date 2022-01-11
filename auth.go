@@ -29,10 +29,13 @@ package mgo
 import (
 	"crypto/md5"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/xdg-go/stringprep"
 
 	"github.com/juju/mgo/v2/bson"
 	"github.com/juju/mgo/v2/internal/scram"
@@ -158,10 +161,19 @@ func (socket *mongoSocket) resetNonce() {
 	}
 }
 
+const (
+	scramSha1   = "SCRAM-SHA-1"
+	scramSha256 = "SCRAM-SHA-256"
+)
+
 func (socket *mongoSocket) Login(cred Credential) error {
 	socket.Lock()
-	if cred.Mechanism == "" && socket.serverInfo.MaxWireVersion >= 3 {
-		cred.Mechanism = "SCRAM-SHA-1"
+	if cred.Mechanism == "" {
+		if socket.serverInfo.MaxWireVersion >= 13 {
+			cred.Mechanism = scramSha256
+		} else if socket.serverInfo.MaxWireVersion >= 3 {
+			cred.Mechanism = scramSha1
+		}
 	}
 	for _, sockCred := range socket.creds {
 		if sockCred == cred {
@@ -274,9 +286,9 @@ func (socket *mongoSocket) loginPlain(cred Credential) error {
 func (socket *mongoSocket) loginSASL(cred Credential) error {
 	var sasl saslStepper
 	var err error
-	if cred.Mechanism == "SCRAM-SHA-1" {
+	if cred.Mechanism == scramSha1 || cred.Mechanism == scramSha256 {
 		// SCRAM is handled without external libraries.
-		sasl = saslNewScram(cred)
+		sasl, err = saslNewScram(cred)
 	} else if len(cred.ServiceHost) > 0 {
 		sasl, err = saslNew(cred, cred.ServiceHost)
 	} else {
@@ -312,6 +324,7 @@ func (socket *mongoSocket) loginSASL(cred Credential) error {
 	start := 1
 	cmd := saslCmd{}
 	res := saslResult{}
+	doneHandshake := false
 	for {
 		payload, done, err := sasl.Step(res.Payload)
 		if err != nil {
@@ -331,6 +344,9 @@ func (socket *mongoSocket) loginSASL(cred Credential) error {
 			Mechanism:      cred.Mechanism,
 			Payload:        payload,
 		}
+		if doneHandshake {
+			cmd.Mechanism = ""
+		}
 		start = 0
 		err = socket.loginRun(cred.Source, &cmd, &res, func() error {
 			// See the comment on lock for why this is necessary.
@@ -343,6 +359,7 @@ func (socket *mongoSocket) loginSASL(cred Credential) error {
 		if err != nil {
 			return err
 		}
+		doneHandshake = true
 		if done && res.Done {
 			socket.dropAuth(cred.Source)
 			socket.creds = append(socket.creds, cred)
@@ -353,11 +370,20 @@ func (socket *mongoSocket) loginSASL(cred Credential) error {
 	return nil
 }
 
-func saslNewScram(cred Credential) *saslScram {
-	credsum := md5.New()
-	credsum.Write([]byte(cred.Username + ":mongo:" + cred.Password))
-	client := scram.NewClient(sha1.New, cred.Username, hex.EncodeToString(credsum.Sum(nil)))
-	return &saslScram{cred: cred, client: client}
+func saslNewScram(cred Credential) (*saslScram, error) {
+	var client *scram.Client
+	if cred.Mechanism == scramSha1 {
+		credsum := md5.New()
+		credsum.Write([]byte(cred.Username + ":mongo:" + cred.Password))
+		client = scram.NewClient(sha1.New, cred.Username, hex.EncodeToString(credsum.Sum(nil)))
+	} else {
+		passprep, err := stringprep.SASLprep.Prepare(cred.Password)
+		if err != nil {
+			return nil, fmt.Errorf("error creating SCRAM-256 digest: %v", err)
+		}
+		client = scram.NewClient(sha256.New, cred.Username, passprep)
+	}
+	return &saslScram{cred: cred, client: client}, nil
 }
 
 type saslScram struct {
