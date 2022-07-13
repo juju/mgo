@@ -2494,6 +2494,30 @@ func IsRetryable(err error) bool {
 	return false
 }
 
+// IsNonPrimaryWriteFailure returns true when the error is a retryable error code.
+// These codes are from the Mongo Go Driver.
+func IsNonPrimaryWriteFailure(err error) bool {
+	code := 0
+	switch e := err.(type) {
+	case *LastError:
+		code = e.Code
+	case *QueryError:
+		code = e.Code
+	case *BulkError:
+		for _, ecase := range e.ecases {
+			if !IsNonPrimaryWriteFailure(ecase.Err) {
+				return false
+			}
+		}
+		return true
+	}
+	switch code {
+	case 189, 10107:
+		return true
+	}
+	return false
+}
+
 // IsSnapshotError is returned when a snapshot error is experienced, such as a
 // collection being written to was being modified or was very recently created.
 // A transaction should probably be rebuilt when this error is experienced.
@@ -4560,8 +4584,13 @@ func (s *Session) acquireSocket(slaveOk bool) (*mongoSocket, error) {
 		return s.masterSocket, nil
 	}
 
+	cluster := s.cluster_
+	if cluster == nil {
+		return nil, errors.New("Closed explicitly")
+	}
+
 	// Still not good.  We need a new socket.
-	sock, err := s.cluster().AcquireSocket(s.consistency, slaveOk && s.slaveOk, s.syncTimeout, s.sockTimeout, s.queryConfig.op.serverTags, s.poolLimit)
+	sock, err := cluster.AcquireSocket(s.consistency, slaveOk && s.slaveOk, s.syncTimeout, s.sockTimeout, s.queryConfig.op.serverTags, s.poolLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -4587,6 +4616,31 @@ func (s *Session) acquireSocket(slaveOk bool) (*mongoSocket, error) {
 	}
 
 	return sock, nil
+}
+
+// handleNonPrimaryWrite handles forcing a server sync when
+// the primary has changed.
+// It returns true if the write can be retried, otherwise the
+// error should bubble up the the user or the transaction layer.
+func (s *Session) handleNonPrimaryWrite(on *mongoSocket) bool {
+	if on == nil {
+		return false
+	}
+	canRetry := false
+	s.m.Lock()
+	if s.masterSocket == on {
+		canRetry = true
+		s.masterSocket.Release()
+	}
+	s.masterSocket = nil
+	s.m.Unlock()
+	s.m.RLock()
+	defer s.m.RUnlock()
+	if s.cluster_ == nil {
+		return false
+	}
+	s.cluster_.syncServersAndWait()
+	return canRetry && s.transaction == nil
 }
 
 // setSocket binds socket to this section.
@@ -4723,12 +4777,28 @@ func (r *writeCmdResult) BulkErrorCases() []BulkErrorCase {
 // LastError result is made available in lerr, and if lerr.Err is set it
 // will also be returned as err.
 func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err error) {
+	for i := 0; i < 2; i++ {
+		var canRetry bool
+		canRetry, lerr, err = c.tryWriteOp(op, ordered)
+		if !canRetry {
+			return
+		}
+	}
+	return
+}
+
+func (c *Collection) tryWriteOp(op interface{}, ordered bool) (canRetry bool, lerr *LastError, err error) {
 	s := c.Database.Session
 	socket, err := s.acquireSocket(c.Database.Name == "local")
 	if err != nil {
-		return nil, err
+		return false, nil, err
 	}
 	defer socket.Release()
+	defer func() {
+		if IsNonPrimaryWriteFailure(err) {
+			canRetry = s.handleNonPrimaryWrite(socket)
+		}
+	}()
 
 	s.m.RLock()
 	safeOp := s.safeOp
@@ -4758,16 +4828,17 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 					}
 					lerr.ecases = append(lerr.ecases, oplerr.ecases...)
 					if op.flags&1 == 0 {
-						return &lerr, err
+						return false, &lerr, err
 					}
 				}
 			}
 			if len(lerr.ecases) != 0 {
-				return &lerr, lerr.ecases[0].Err
+				return false, &lerr, lerr.ecases[0].Err
 			}
-			return &lerr, nil
+			return false, &lerr, nil
 		}
-		return c.writeOpCommand(socket, safeOp, op, ordered, bypassValidation, txn)
+		lerr, err = c.writeOpCommand(socket, safeOp, op, ordered, bypassValidation, txn)
+		return
 	} else if updateOps, ok := op.(bulkUpdateOp); ok {
 		var lerr LastError
 		for i, updateOp := range updateOps {
@@ -4782,9 +4853,9 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 			}
 		}
 		if len(lerr.ecases) != 0 {
-			return &lerr, lerr.ecases[0].Err
+			return false, &lerr, lerr.ecases[0].Err
 		}
-		return &lerr, nil
+		return false, &lerr, nil
 	} else if deleteOps, ok := op.(bulkDeleteOp); ok {
 		var lerr LastError
 		for i, deleteOp := range deleteOps {
@@ -4799,11 +4870,12 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 			}
 		}
 		if len(lerr.ecases) != 0 {
-			return &lerr, lerr.ecases[0].Err
+			return false, &lerr, lerr.ecases[0].Err
 		}
-		return &lerr, nil
+		return false, &lerr, nil
 	}
-	return c.writeOpQuery(socket, safeOp, op, ordered)
+	lerr, err = c.writeOpQuery(socket, safeOp, op, ordered)
+	return
 }
 
 func (c *Collection) writeOpQuery(socket *mongoSocket, safeOp *queryOp, op interface{}, ordered bool) (lerr *LastError, err error) {

@@ -326,6 +326,13 @@ func (cluster *mongoCluster) syncServers() {
 	}
 }
 
+func (cluster *mongoCluster) syncServersAndWait() {
+	cluster.syncServers()
+	cluster.RLock()
+	defer cluster.RUnlock()
+	cluster.serverSynced.Wait()
+}
+
 // How long to wait for a checkup of the cluster topology if nothing
 // else kicks a synchronization before that.
 const syncServersDelay = 30 * time.Second

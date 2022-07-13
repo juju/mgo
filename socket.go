@@ -29,6 +29,7 @@ package mgo
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -335,7 +336,7 @@ func (socket *mongoSocket) kill(err error, abend bool) {
 	socket.Unlock()
 	for _, replyFunc := range replyFuncs {
 		logf("Socket %p to %s: notifying replyFunc of closed socket: %s", socket, socket.addr, err.Error())
-		replyFunc(err, nil, -1, nil)
+		replyFunc(convertNetOpErrors(err), nil, -1, nil)
 	}
 	if abend {
 		server.AbendSocket(socket)
@@ -527,6 +528,18 @@ func (socket *mongoSocket) Query(ops ...interface{}) (err error) {
 		socket.updateDeadline(readDeadline)
 	}
 	socket.Unlock()
+	return convertNetOpErrors(err)
+}
+
+func convertNetOpErrors(err error) error {
+	opErr, ok := err.(*net.OpError)
+	if !ok {
+		return err
+	}
+	switch opErr.Op {
+	case "read", "write", "close":
+		return io.EOF
+	}
 	return err
 }
 
@@ -593,7 +606,7 @@ func (socket *mongoSocket) readLoop() {
 				err := fill(conn, s)
 				if err != nil {
 					if replyFunc != nil {
-						replyFunc(err, nil, -1, nil)
+						replyFunc(convertNetOpErrors(err), nil, -1, nil)
 					}
 					socket.kill(err, true)
 					return
@@ -610,7 +623,7 @@ func (socket *mongoSocket) readLoop() {
 				err = fill(conn, b[4:])
 				if err != nil {
 					if replyFunc != nil {
-						replyFunc(err, nil, -1, nil)
+						replyFunc(convertNetOpErrors(err), nil, -1, nil)
 					}
 					socket.kill(err, true)
 					return

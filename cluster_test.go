@@ -446,7 +446,7 @@ func (s *S) TestModeStrongFallover(c *C) {
 
 	// Kill the master.
 	host := result.Host
-	s.Stop(host)
+	s.Shutdown(c, host)
 
 	// This must fail, since the connection was broken.
 	err = session.Run("serverStatus", result)
@@ -500,7 +500,7 @@ func (s *S) TestModePrimaryHiccup(c *C) {
 
 	// Kill the master, but bring it back immediatelly.
 	host := result.Host
-	s.Stop(host)
+	s.Shutdown(c, host)
 	s.StartAll()
 
 	// This must fail, since the connection was broken.
@@ -547,7 +547,7 @@ func (s *S) TestModeMonotonicFallover(c *C) {
 
 	// Kill the master.
 	host := result.Host
-	s.Stop(host)
+	s.Shutdown(c, host)
 
 	// This must fail, since the connection was broken.
 	err = session.Run("serverStatus", result)
@@ -618,7 +618,7 @@ func (s *S) TestModeMonotonicWithSlaveFallover(c *C) {
 	c.Assert(master, Not(Equals), slave)
 
 	// Kill the master.
-	s.Stop(master)
+	s.Shutdown(c, master)
 
 	// Session must still be good, since we were talking to a slave.
 	err = session.Run("serverStatus", ssresult)
@@ -669,7 +669,9 @@ func (s *S) TestModeEventualFallover(c *C) {
 	time.Sleep(3 * time.Second)
 
 	// Kill the master.
-	s.Stop(master)
+	s.Shutdown(c, master)
+
+	time.Sleep(3 * time.Second)
 
 	// Should still work, with the new master now.
 	coll = session.DB("mydb").C("mycoll")
@@ -744,7 +746,7 @@ func (s *S) TestModeSecondaryPreferredFallover(c *C) {
 	time.Sleep(3 * time.Second)
 
 	// Kill the primary.
-	s.Stop("localhost:40011")
+	s.Shutdown(c, ":40011")
 
 	// It can still talk to the selected secondary.
 	err = session.Run("serverStatus", result)
@@ -788,7 +790,7 @@ func (s *S) TestModePrimaryPreferredFallover(c *C) {
 	c.Assert(supvName(result.Host), Equals, "rs1a")
 
 	// Kill the primary.
-	s.Stop("localhost:40011")
+	s.Shutdown(c, "localhost:40011")
 
 	// Should now fail as there was a primary socket in use already.
 	err = session.Run("serverStatus", result)
@@ -833,7 +835,9 @@ func (s *S) TestModePrimaryFallover(c *C) {
 	c.Assert(supvName(result.Host), Equals, "rs1a")
 
 	// Kill the primary.
-	s.Stop("localhost:40011")
+	s.Shutdown(c, "localhost:40011")
+	err = session.Run("serverStatus", result)
+	c.Assert(err, NotNil)
 
 	session.Refresh()
 
@@ -886,7 +890,7 @@ func (s *S) TestPreserveSocketCountOnSync(c *C) {
 	c.Assert(stats.SocketsAlive, Equals, 3)
 
 	// Kill the master (with rs1, 'a' is always the master).
-	s.Stop("localhost:40011")
+	s.Shutdown(c, "localhost:40011")
 
 	// Wait for the logic to run for a bit and bring it back.
 	startedAll := make(chan bool)
@@ -990,7 +994,9 @@ func (s *S) TestSyncTimeout(c *C) {
 	c.Assert(err, IsNil)
 	defer session.Close()
 
-	s.Stop("localhost:40001")
+	s.Kill(":40001")
+
+	time.Sleep(5 * time.Second)
 
 	timeout := 3 * time.Second
 	session.SetSyncTimeout(timeout)
@@ -1041,7 +1047,7 @@ func (s *S) TestSocketTimeout(c *C) {
 	// Do something.
 	result := struct{ Ok bool }{}
 	err = session.Run("getLastError", &result)
-	c.Assert(err, ErrorMatches, ".*: i/o timeout")
+	c.Assert(err, ErrorMatches, "EOF")
 	c.Assert(started.Before(time.Now().Add(-timeout)), Equals, true)
 	c.Assert(started.After(time.Now().Add(-timeout*2)), Equals, true)
 }
@@ -1295,7 +1301,7 @@ func (s *S) TestMonotonicSlaveOkFlagWithMongos(c *C) {
 	c.Assert(imresult.IsMaster, Equals, true, Commentf("%s is not the master", master))
 
 	// Ensure mongos is aware about the current topology.
-	s.Stop(":40201")
+	s.Shutdown(c, ":40201")
 	s.StartAll()
 
 	mongos, err := mgo.Dial("localhost:40202")
@@ -1383,7 +1389,7 @@ func (s *S) TestSecondaryModeWithMongos(c *C) {
 	c.Assert(imresult.IsMaster, Equals, true, Commentf("%s is not the master", master))
 
 	// Ensure mongos is aware about the current topology.
-	s.Stop(":40201")
+	s.Shutdown(c, ":40201")
 	s.StartAll()
 
 	mongos, err := mgo.Dial("localhost:40202")
@@ -1472,6 +1478,9 @@ func (s *S) TestSecondaryModeWithMongosInsert(c *C) {
 	err = coll.Insert(M{"a": 1})
 	c.Assert(err, IsNil)
 
+	// Secondary read will take time due to eventual consistency.
+	time.Sleep(1 * time.Second)
+
 	var result struct{ A int }
 	coll.Find(nil).One(&result)
 	c.Assert(result.A, Equals, 1)
@@ -1485,6 +1494,13 @@ func (s *S) TestRemovalOfClusterMember(c *C) {
 	master, err := mgo.Dial("localhost:40021")
 	c.Assert(err, IsNil)
 	defer master.Close()
+
+	info, err := master.BuildInfo()
+	c.Assert(err, IsNil)
+	if info.VersionAtLeast(4, 2, 0) {
+		c.Skip("eval not supported since mongo 4.2")
+		return
+	}
 
 	// Wait for cluster to fully sync up.
 	for i := 0; i < 10; i++ {
@@ -1515,12 +1531,13 @@ func (s *S) TestRemovalOfClusterMember(c *C) {
 			"40023": `{_id: 3, host: "127.0.0.1:40023", priority: 0, tags: {rs2: "c"}}`,
 		}
 		master.Refresh()
-		master.Run(bson.D{{"$eval", `rs.add(` + config[hostPort(slaveAddr)] + `)`}}, nil)
+		err = master.Run(bson.D{{"$eval", `rs.add(` + config[hostPort(slaveAddr)] + `)`}}, nil)
+		c.Assert(err, IsNil)
 		master.Close()
 		slave.Close()
 
 		// Ensure suite syncs up with the changes before next test.
-		s.Stop(":40201")
+		s.Shutdown(c, ":40201")
 		s.StartAll()
 		time.Sleep(8 * time.Second)
 		// TODO Find a better way to find out when mongos is fully aware that all
@@ -1530,7 +1547,8 @@ func (s *S) TestRemovalOfClusterMember(c *C) {
 
 	c.Logf("========== Removing slave: %s ==========", slaveAddr)
 
-	master.Run(bson.D{{"$eval", `rs.remove("` + slaveAddr + `")`}}, nil)
+	err = master.Run(bson.D{{"$eval", `rs.remove("` + slaveAddr + `")`}}, nil)
+	c.Assert(err, NotNil)
 
 	master.Refresh()
 
@@ -1776,28 +1794,23 @@ func (s *S) TestPrimaryShutdownOnAuthShard(c *C) {
 	err = rs.Run("serverStatus", result)
 	c.Assert(err, IsNil)
 
+	// Confirm it's the master even though it's strong consistency.
+	isMaster := M{}
+	cmd := rs.DB("admin").C("$cmd")
+	err = cmd.Find(M{"ismaster": 1}).One(&isMaster)
+	c.Assert(err, IsNil)
+	c.Assert(isMaster["ismaster"], Equals, true)
+
 	// Kill the master.
 	host := result.Host
-	s.Stop(host)
+	s.Kill(host)
 
 	// This must fail, since the connection was broken.
 	err = rs.Run("serverStatus", result)
 	c.Assert(err, Equals, io.EOF)
 
-	// This won't work because the master just died.
+	// This should always work because the shard redirects to the new master.
 	err = coll.Insert(bson.M{"n": 2})
-	c.Assert(err, NotNil)
-
-	// Refresh session and wait for re-election.
-	session.Refresh()
-	for i := 0; i < 60; i++ {
-		err = coll.Insert(bson.M{"n": 3})
-		if err == nil {
-			break
-		}
-		c.Logf("Waiting for replica set to elect a new master. Last error: %v", err)
-		time.Sleep(500 * time.Millisecond)
-	}
 	c.Assert(err, IsNil)
 
 	count, err := coll.Count()

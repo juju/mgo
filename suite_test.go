@@ -35,6 +35,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,23 @@ type S struct {
 	frozen  []string
 }
 
+func (s *S) Shutdown(c *C, name string) {
+	ss := strings.Split(name, ":")
+	name = "localhost" + ":" + ss[1]
+
+	connStr := name
+	switch connStr {
+	case "localhost:40031":
+		connStr = "root:rapadura@localhost:40031"
+	}
+	session, err := mgo.Dial(connStr)
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	_ = session.Run(bson.D{{"shutdown", 1}, {"force", true}}, nil)
+	s.Stop(name)
+}
+
 func (s *S) versionAtLeast(v ...int) (result bool) {
 	for i := range v {
 		if i == len(s.build.VersionArray) {
@@ -86,11 +104,11 @@ func (s *S) SetUpSuite(c *C) {
 	mgo.SetStats(true)
 	s.StartAll()
 
-	session, err := mgo.Dial("localhost:40001")
+	session, err := mgo.Dial("127.0.0.1:40001")
 	c.Assert(err, IsNil)
+	defer session.Close()
 	s.build, err = session.BuildInfo()
 	c.Check(err, IsNil)
-	session.Close()
 }
 
 func (s *S) SetUpTest(c *C) {
@@ -150,6 +168,18 @@ func (s *S) Stop(host string) {
 	s.stopped = true
 }
 
+func (s *S) Kill(host string) {
+	err := run("svc -d _harness/daemons/" + supvName(host))
+	if err != nil {
+		panic(err)
+	}
+	err = run("svc -k _harness/daemons/" + supvName(host))
+	if err != nil {
+		panic(err)
+	}
+	s.stopped = true
+}
+
 func (s *S) pid(host string) int {
 	// Note recent releases of lsof force 'f' to be present in the output (WTF?).
 	cmd := exec.Command("lsof", "-iTCP:"+hostPort(host), "-sTCP:LISTEN", "-Fpf")
@@ -185,16 +215,25 @@ func (s *S) Thaw(host string) {
 	}
 }
 
-func (s *S) StartAll() {
-	if s.stopped {
-		// Restart any stopped nodes.
-		run("svc -u _harness/daemons/*")
-		err := run("mongo --nodb harness/mongojs/wait.js")
-		if err != nil {
-			panic(err)
-		}
-		s.stopped = false
+func (s *S) RestartAll() {
+	// Restart any stopped nodes.
+	run("svc -d _harness/daemons/*")
+	run("svc -u _harness/daemons/*")
+	err := run("mongo --nodb harness/mongojs/wait.js")
+	if err != nil {
+		panic(err)
 	}
+	s.stopped = false
+}
+
+func (s *S) StartAll() {
+	// Restart any stopped nodes.
+	run("svc -u _harness/daemons/*")
+	err := run("mongo --nodb harness/mongojs/wait.js")
+	if err != nil {
+		s.RestartAll()
+	}
+	s.stopped = false
 }
 
 func run(command string) error {
