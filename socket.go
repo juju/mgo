@@ -34,7 +34,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v3/bson"
 )
 
 type replyFunc func(err error, reply *replyOp, docNum int, docData []byte)

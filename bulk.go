@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sort"
 
-	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v3/bson"
 )
 
 // Bulk represents an operation that can be prepared with several

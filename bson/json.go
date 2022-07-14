@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/juju/mgo/v2/internal/json"
+	"github.com/juju/mgo/v3/internal/json"
 )
 
 // UnmarshalJSON unmarshals a JSON value that may hold non-standard

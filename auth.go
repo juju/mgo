@@ -37,8 +37,8 @@ import (
 
 	"github.com/xdg-go/stringprep"
 
-	"github.com/juju/mgo/v2/bson"
-	"github.com/juju/mgo/v2/internal/scram"
+	"github.com/juju/mgo/v3/bson"
+	"github.com/juju/mgo/v3/internal/scram"
 )
 
 type authCmd struct {
