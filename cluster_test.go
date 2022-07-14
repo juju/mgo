@@ -719,23 +719,38 @@ func (s *S) TestModeSecondaryPreferredFallover(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Dial("localhost:40011")
-	c.Assert(err, IsNil)
-	defer session.Close()
+	var session *mgo.Session
+	defer func() {
+		if session != nil {
+			session.Close()
+		}
+	}()
+	var secondary string
+	var err error
 
-	// Ensure secondaries are available for being picked up.
-	for len(session.LiveServers()) != 3 {
-		c.Log("Waiting for cluster sync to finish...")
-		time.Sleep(5e8)
+	for i := 0; i < 10; i++ {
+		session, err = mgo.Dial("localhost:40011")
+		c.Assert(err, IsNil)
+
+		// Ensure secondaries are available for being picked up.
+		for len(session.LiveServers()) != 3 {
+			c.Log("Waiting for cluster sync to finish...")
+			time.Sleep(5e8)
+		}
+
+		session.SetMode(mgo.SecondaryPreferred, true)
+
+		result := &struct{ Host string }{}
+		err = session.Run("serverStatus", result)
+		c.Assert(err, IsNil)
+		if supvName(result.Host) != "rs1a" {
+			secondary = result.Host
+			break
+		}
+
+		session.Close()
+		session = nil
 	}
-
-	session.SetMode(mgo.SecondaryPreferred, true)
-
-	result := &struct{ Host string }{}
-	err = session.Run("serverStatus", result)
-	c.Assert(err, IsNil)
-	c.Assert(supvName(result.Host), Not(Equals), "rs1a")
-	secondary := result.Host
 
 	// Should connect to the primary when needed.
 	coll := session.DB("mydb").C("mycoll")
@@ -749,6 +764,7 @@ func (s *S) TestModeSecondaryPreferredFallover(c *C) {
 	s.Shutdown(c, ":40011")
 
 	// It can still talk to the selected secondary.
+	result := &struct{ Host string }{}
 	err = session.Run("serverStatus", result)
 	c.Assert(err, IsNil)
 	c.Assert(result.Host, Equals, secondary)
