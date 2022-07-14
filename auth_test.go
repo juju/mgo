@@ -39,7 +39,8 @@ import (
 	"time"
 
 	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2"
+
+	"github.com/juju/mgo/v2"
 )
 
 // failedAuthRegex covers the various messages that Mongo gives from different versions
@@ -891,6 +892,38 @@ func (s *S) TestAuthScramSha1URL(c *C) {
 	defer session.Close()
 
 	mycoll := session.DB("admin").C("mycoll")
+
+	c.Logf("Connected! Testing the need for authentication...")
+	err = mycoll.Find(nil).One(nil)
+	c.Assert(err, Equals, mgo.ErrNotFound)
+}
+
+func (s *S) TestAuthScramSha256Cred(c *C) {
+	if !s.versionAtLeast(4, 0, 0) {
+		c.Skip("SCRAM-SHA-256 tests depend on 4.0.0")
+	}
+	cred := &mgo.Credential{
+		Username:  "root",
+		Password:  "rapadura",
+		Mechanism: "SCRAM-SHA-256",
+		Source:    "admin",
+	}
+	host := "localhost:40002"
+	c.Logf("Connecting to %s...", host)
+	session, err := mgo.Dial(host)
+	c.Assert(err, IsNil)
+	defer session.Close()
+
+	mycoll := session.DB("admin").C("mycoll")
+
+	c.Logf("Connected! Testing the need for authentication...")
+	err = mycoll.Find(nil).One(nil)
+	c.Assert(err, ErrorMatches, failedAuthRegex)
+
+	c.Logf("Authenticating...")
+	err = session.Login(cred)
+	c.Assert(err, IsNil)
+	c.Logf("Authenticated!")
 
 	c.Logf("Connected! Testing the need for authentication...")
 	err = mycoll.Find(nil).One(nil)

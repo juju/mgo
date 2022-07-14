@@ -7,8 +7,8 @@ import (
 
 	. "gopkg.in/check.v1"
 
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/dbtest"
+	"github.com/juju/mgo/v2"
+	"github.com/juju/mgo/v2/dbtest"
 )
 
 type M map[string]interface{}
@@ -49,7 +49,7 @@ func (s *S) TestWipeData(c *C) {
 	session.Close()
 	c.Assert(err, IsNil)
 	for _, name := range names {
-		if name != "local" && name != "admin" {
+		if name != "local" && name != "admin" && name != "config" {
 			c.Fatalf("Wipe should have removed this database: %s", name)
 		}
 	}

@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/juju/mgo/v2/bson"
 )
 
 var (
@@ -21,7 +21,7 @@ type log_Logger interface {
 	Output(calldepth int, s string) error
 }
 
-// Specify the *log.Logger object where log messages should be sent to.
+// SetLogger specifies the *log.Logger object where log messages should be sent to.
 func SetLogger(l log_Logger) {
 	if l == nil {
 		atomic.StorePointer(&logger, nil)
@@ -37,7 +37,7 @@ func getLogger() log_Logger {
 	return nil
 }
 
-// Enable the delivery of debug messages to the logger.  Only meaningful
+// SetDebug enables the delivery of debug messages to the logger.  Only meaningful
 // if a logger is also set.
 func SetDebug(debug bool) {
 	value := uint32(0)

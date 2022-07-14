@@ -8,12 +8,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/juju/mgo/v2"
+	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v2/dbtest"
+	"github.com/juju/mgo/v2/sstxn"
+	"github.com/juju/mgo/v2/txn"
 	. "gopkg.in/check.v1"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2/dbtest"
-	"gopkg.in/mgo.v2/sstxn"
-	"gopkg.in/mgo.v2/txn"
 )
 
 func TestAll(t *testing.T) {
@@ -500,10 +500,7 @@ func (s *S) TestVerifyFieldOrdering(c *C) {
 func (s *S) TestChangeLog(c *C) {
 	c.Assert(s.db.C("people").Create(&mgo.CollectionInfo{}), IsNil)
 	c.Assert(s.db.C("debts").Create(&mgo.CollectionInfo{}), IsNil)
-	c.Assert(s.db.C("chglog").Create(&mgo.CollectionInfo{
-		Capped:   true,
-		MaxBytes: 1e6,
-	}), IsNil)
+	c.Assert(s.db.C("chglog").Create(&mgo.CollectionInfo{}), IsNil)
 	chglog := s.db.C("chglog")
 	s.runner.ChangeLog(chglog)
 
