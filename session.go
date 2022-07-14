@@ -355,7 +355,19 @@ type DialInfo struct {
 	// first connecting and on follow up operations in the session. If
 	// timeout is zero, the call may block forever waiting for a connection
 	// to be established. Timeout does not affect logic in DialServer.
+	// Deprecated: Use SocketTimeout and SyncTimeout
 	Timeout time.Duration
+
+	// SyncTimeout sets the amount of time an operation with this session
+	// will wait before returning an error in case a connection to a usable
+	// server can't be established. Set it to zero to wait forever.
+	// SyncTimeout does not affect logic in DialServer.
+	SyncTimeout time.Duration
+
+	// SocketTimeout sets the amount of time to wait for a non-responding
+	// socket to the database before it is forcefully closed.
+	// SocketTimeout does not affect logic in DialServer.
+	SocketTimeout time.Duration
 
 	// FailFast will cause connection and query attempts to fail faster when
 	// the server is unavailable, instead of retrying until the configured
@@ -440,8 +452,14 @@ func DialWithInfo(info *DialInfo) (*Session, error) {
 		}
 		addrs[i] = addr
 	}
+	if info.SyncTimeout == time.Duration(0) {
+		info.SyncTimeout = info.Timeout
+	}
+	if info.SocketTimeout == time.Duration(0) {
+		info.SocketTimeout = info.Timeout
+	}
 	cluster := newCluster(addrs, info.Direct, info.FailFast, dialer{info.Dial, info.DialServer}, info.ReplicaSetName)
-	session := newSession(Eventual, cluster, info.Timeout)
+	session := newSession(Eventual, cluster, info.SyncTimeout, info.SocketTimeout)
 	session.defaultdb = info.Database
 	if session.defaultdb == "" {
 		session.defaultdb = "test"
@@ -539,12 +557,12 @@ func extractURL(s string) (*urlInfo, error) {
 	return info, nil
 }
 
-func newSession(consistency Mode, cluster *mongoCluster, timeout time.Duration) (session *Session) {
+func newSession(consistency Mode, cluster *mongoCluster, syncTimeout time.Duration, socketTimeout time.Duration) (session *Session) {
 	cluster.Acquire()
 	session = &Session{
 		cluster_:    cluster,
-		syncTimeout: timeout,
-		sockTimeout: timeout,
+		syncTimeout: syncTimeout,
+		sockTimeout: socketTimeout,
 		poolLimit:   4096,
 	}
 	debugf("New session %p on cluster %p", session, cluster)

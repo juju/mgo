@@ -142,7 +142,7 @@ type isMasterResult struct {
 
 func (cluster *mongoCluster) isMaster(socket *mongoSocket, result *isMasterResult) error {
 	// Monotonic let's it talk to a slave and still hold the socket.
-	session := newSession(Monotonic, cluster, 10*time.Second)
+	session := newSession(Monotonic, cluster, 10*time.Second, 10*time.Second)
 	session.setSocket(socket)
 	err := session.Run("ismaster", result)
 	session.Close()
@@ -369,12 +369,6 @@ func (cluster *mongoCluster) syncServersLoop() {
 
 		cluster.Release()
 
-		// Hold off before allowing another sync. No point in
-		// burning CPU looking for down servers.
-		if !cluster.failFast {
-			time.Sleep(syncShortDelay)
-		}
-
 		cluster.Lock()
 		if cluster.references == 0 {
 			cluster.Unlock()
@@ -392,6 +386,10 @@ func (cluster *mongoCluster) syncServersLoop() {
 			log("SYNC No masters found. Will synchronize again.")
 			time.Sleep(syncShortDelay)
 			continue
+		} else if !cluster.failFast {
+			// Hold off before allowing another sync. No point in
+			// burning CPU looking for down servers.
+			time.Sleep(syncShortDelay)
 		}
 
 		debugf("SYNC Cluster %p waiting for next requested or scheduled sync.", cluster)
