@@ -141,7 +141,7 @@ type isMasterResult struct {
 }
 
 func (cluster *mongoCluster) isMaster(socket *mongoSocket, result *isMasterResult) error {
-	// Monotonic let's it talk to a slave and still hold the socket.
+	// Monotonic lets it talk to a slave and still hold the socket.
 	session := newSession(Monotonic, cluster, 10*time.Second, 10*time.Second)
 	session.setSocket(socket)
 	err := session.Run("ismaster", result)
@@ -173,7 +173,7 @@ func (cluster *mongoCluster) syncServer(server *mongoServer) (info *mongoServerI
 	var result isMasterResult
 	var tryerr error
 	for retry := 0; ; retry++ {
-		if retry == 3 || retry == 1 && cluster.failFast {
+		if retry >= 5 || retry == 1 && cluster.failFast {
 			return nil, nil, tryerr
 		}
 		if retry > 0 {
@@ -336,7 +336,7 @@ func (cluster *mongoCluster) syncServersAndWait() {
 // How long to wait for a checkup of the cluster topology if nothing
 // else kicks a synchronization before that.
 const syncServersDelay = 30 * time.Second
-const syncShortDelay = 500 * time.Millisecond
+const syncShortDelay = 1 * time.Second
 
 // syncServersLoop loops while the cluster is alive to keep its idea of
 // the server topology up-to-date. It must be called just once from
