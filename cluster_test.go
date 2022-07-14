@@ -1009,7 +1009,8 @@ func (s *S) TestSyncTimeout(c *C) {
 	result := struct{ Ok bool }{}
 	err = session.Run("getLastError", &result)
 	c.Assert(err, ErrorMatches, "no reachable servers")
-	c.Assert(time.Since(started) < timeout+2*time.Second, Equals, true)
+	// 5 extra seconds because of 5 retries for each server usually taking 1 second.
+	c.Assert(time.Since(started) < timeout+5*time.Second, Equals, true)
 }
 
 func (s *S) TestDialWithTimeout(c *C) {
@@ -1017,7 +1018,7 @@ func (s *S) TestDialWithTimeout(c *C) {
 		c.Skip("-fast")
 	}
 
-	timeout := 5 * time.Second
+	timeout := 1 * time.Second
 	started := time.Now()
 
 	// 40009 isn't used by the test servers.
@@ -1027,7 +1028,8 @@ func (s *S) TestDialWithTimeout(c *C) {
 	}
 	c.Assert(err, ErrorMatches, "no reachable servers")
 	c.Assert(session, IsNil)
-	c.Assert(time.Since(started) < timeout+2*time.Second, Equals, true)
+	// 5 extra seconds because of 5 retries for each server usually taking 1 second.
+	c.Assert(time.Since(started) < timeout+5*time.Second, Equals, true)
 }
 
 func (s *S) TestSocketTimeout(c *C) {
@@ -1035,14 +1037,18 @@ func (s *S) TestSocketTimeout(c *C) {
 		c.Skip("-fast")
 	}
 
-	session, err := mgo.Dial("localhost:40001")
+	timeout := 2 * time.Second
+	session, err := mgo.DialWithInfo(&mgo.DialInfo{
+		Addrs:         []string{"localhost:40001"},
+		SocketTimeout: timeout,
+		SyncTimeout:   60 * time.Second,
+	})
 	c.Assert(err, IsNil)
 	defer session.Close()
 
 	s.Freeze("localhost:40001")
+	time.Sleep(1 * time.Second)
 
-	timeout := 3 * time.Second
-	session.SetSocketTimeout(timeout)
 	started := time.Now()
 
 	// Do something.
