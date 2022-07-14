@@ -1006,8 +1006,7 @@ func (s *S) TestSyncTimeout(c *C) {
 	result := struct{ Ok bool }{}
 	err = session.Run("getLastError", &result)
 	c.Assert(err, ErrorMatches, "no reachable servers")
-	c.Assert(started.Before(time.Now().Add(-timeout)), Equals, true)
-	c.Assert(started.After(time.Now().Add(-timeout*2)), Equals, true)
+	c.Assert(time.Since(started) < timeout*2, Equals, true)
 }
 
 func (s *S) TestDialWithTimeout(c *C) {
@@ -1025,8 +1024,7 @@ func (s *S) TestDialWithTimeout(c *C) {
 	}
 	c.Assert(err, ErrorMatches, "no reachable servers")
 	c.Assert(session, IsNil)
-	c.Assert(started.Before(time.Now().Add(-timeout)), Equals, true)
-	c.Assert(started.After(time.Now().Add(-timeout*2)), Equals, true)
+	c.Assert(time.Since(started) < timeout*2, Equals, true)
 }
 
 func (s *S) TestSocketTimeout(c *C) {
@@ -1048,8 +1046,7 @@ func (s *S) TestSocketTimeout(c *C) {
 	result := struct{ Ok bool }{}
 	err = session.Run("getLastError", &result)
 	c.Assert(err, ErrorMatches, "EOF")
-	c.Assert(started.Before(time.Now().Add(-timeout)), Equals, true)
-	c.Assert(started.After(time.Now().Add(-timeout*2)), Equals, true)
+	c.Assert(time.Since(started) < timeout*2, Equals, true)
 }
 
 func (s *S) TestSocketTimeoutOnDial(c *C) {
