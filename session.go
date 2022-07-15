@@ -160,8 +160,9 @@ type Iter struct {
 }
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrCursor   = errors.New("invalid cursor")
+	ErrNotFound      = errors.New("not found")
+	ErrCursor        = errors.New("invalid cursor")
+	ErrNoTransaction = errors.New("no transaction in progress")
 )
 
 const (
@@ -5092,11 +5093,11 @@ func (s *Session) finishTransaction(command string) error {
 	s.m.RLock()
 	if len(s.sessionId.Data) == 0 {
 		s.m.RUnlock()
-		return errors.New("no transaction in progress")
+		return ErrNoTransaction
 	}
 	if s.transaction == nil {
 		s.m.RUnlock()
-		return errors.New("no transaction in progress")
+		return ErrNoTransaction
 	}
 	txn := s.transaction
 	sessionId := s.sessionId

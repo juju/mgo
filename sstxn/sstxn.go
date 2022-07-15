@@ -24,6 +24,7 @@
 package sstxn
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/juju/mgo/v3"
@@ -157,7 +158,7 @@ func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 	defer func() {
 		if !completed {
 			abortErr := r.db.Session.AbortTransaction()
-			if abortErr != nil && abortErr.Error() != "no transaction in progress" {
+			if abortErr != nil && !errors.Is(abortErr, mgo.ErrNoTransaction) {
 				r.logger.Errorf("error while aborting: %v", abortErr)
 			}
 		}

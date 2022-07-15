@@ -430,7 +430,7 @@ func (s *S) TestModeEventualAfterStrong(c *C) {
 	c.Assert(stats.SocketsInUse, Equals, 0)
 }
 
-func (s *S) TestModeStrongFallover(c *C) {
+func (s *S) TestModeStrongFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}
@@ -522,7 +522,7 @@ func (s *S) TestModePrimaryHiccup(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *S) TestModeMonotonicFallover(c *C) {
+func (s *S) TestModeMonotonicFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}
@@ -565,7 +565,7 @@ func (s *S) TestModeMonotonicFallover(c *C) {
 	c.Assert(result.Host, Not(Equals), host)
 }
 
-func (s *S) TestModeMonotonicWithSlaveFallover(c *C) {
+func (s *S) TestModeMonotonicWithSlaveFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}
@@ -644,7 +644,7 @@ func (s *S) TestModeMonotonicWithSlaveFallover(c *C) {
 	c.Assert(ssresult.Host, Not(Equals), master)
 }
 
-func (s *S) TestModeEventualFallover(c *C) {
+func (s *S) TestModeEventualFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}
@@ -714,7 +714,7 @@ func (s *S) TestModeSecondaryPreferredJustPrimary(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *S) TestModeSecondaryPreferredFallover(c *C) {
+func (s *S) TestModeSecondaryPreferredFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}
@@ -789,7 +789,7 @@ func (s *S) TestModeSecondaryPreferredFallover(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *S) TestModePrimaryPreferredFallover(c *C) {
+func (s *S) TestModePrimaryPreferredFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}
@@ -832,7 +832,7 @@ func (s *S) TestModePrimaryPreferredFallover(c *C) {
 	c.Assert(supvName(result.Host), Equals, "rs1a")
 }
 
-func (s *S) TestModePrimaryFallover(c *C) {
+func (s *S) TestModePrimaryFailover(c *C) {
 	if *fast {
 		c.Skip("-fast")
 	}

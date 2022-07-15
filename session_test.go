@@ -3559,7 +3559,7 @@ func (s *S) TestDistinct(c *C) {
 }
 
 func (s *S) TestMapReduce(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3595,7 +3595,7 @@ func (s *S) TestMapReduce(c *C) {
 }
 
 func (s *S) TestMapReduceFinalize(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3627,7 +3627,7 @@ func (s *S) TestMapReduceFinalize(c *C) {
 }
 
 func (s *S) TestMapReduceToCollection(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3668,7 +3668,7 @@ func (s *S) TestMapReduceToCollection(c *C) {
 }
 
 func (s *S) TestMapReduceToOtherDb(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3709,7 +3709,7 @@ func (s *S) TestMapReduceToOtherDb(c *C) {
 }
 
 func (s *S) TestMapReduceOutOfOrder(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3733,7 +3733,7 @@ func (s *S) TestMapReduceOutOfOrder(c *C) {
 }
 
 func (s *S) TestMapReduceScope(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3755,7 +3755,7 @@ func (s *S) TestMapReduceScope(c *C) {
 }
 
 func (s *S) TestMapReduceVerbose(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
@@ -3779,7 +3779,7 @@ func (s *S) TestMapReduceVerbose(c *C) {
 }
 
 func (s *S) TestMapReduceLimit(c *C) {
-	c.Skip("fix me")
+	c.Skip("fix me - MapReduce support needs to be updated")
 	session, err := mgo.Dial("localhost:40001")
 	c.Assert(err, IsNil)
 	defer session.Close()
