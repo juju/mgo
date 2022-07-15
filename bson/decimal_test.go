@@ -33,7 +33,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v3/bson"
 
 	. "gopkg.in/check.v1"
 )

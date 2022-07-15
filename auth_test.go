@@ -40,7 +40,7 @@ import (
 
 	. "gopkg.in/check.v1"
 
-	"github.com/juju/mgo/v2"
+	"github.com/juju/mgo/v3"
 )
 
 // failedAuthRegex covers the various messages that Mongo gives from different versions

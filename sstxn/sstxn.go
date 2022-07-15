@@ -24,11 +24,12 @@
 package sstxn
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/juju/mgo/v2"
-	"github.com/juju/mgo/v2/bson"
-	"github.com/juju/mgo/v2/txn"
+	"github.com/juju/mgo/v3"
+	"github.com/juju/mgo/v3/bson"
+	"github.com/juju/mgo/v3/txn"
 )
 
 // Logger defines the types of logging that we will be doing
@@ -157,7 +158,7 @@ func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 	defer func() {
 		if !completed {
 			abortErr := r.db.Session.AbortTransaction()
-			if abortErr != nil {
+			if abortErr != nil && !errors.Is(abortErr, mgo.ErrNoTransaction) {
 				r.logger.Errorf("error while aborting: %v", abortErr)
 			}
 		}
@@ -180,7 +181,9 @@ func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 	if err := r.updateLog(ops, revnos, id); err != nil {
 		return err
 	}
-	if err := r.db.Session.CommitTransaction(); err != nil {
+	if err := r.db.Session.CommitTransaction(); mgo.IsTxnAborted(err) {
+		return txn.ErrAborted
+	} else if err != nil {
 		return err
 	}
 	completed = true
@@ -339,7 +342,7 @@ func (r *Runner) applyUpdate(op txn.Op, revno *int64) error {
 	} else if IsWriteConflict(err) {
 		r.logger.Tracef("update op: %#v write conflict: %v", op, err)
 		return errWriteConflict
-	} else if mgo.IsDup(err) {
+	} else if mgo.IsDup(err) || mgo.IsTxnAborted(err) {
 		// This has triggered a server-side abort, so make sure the user
 		// understands the txn is aborted
 		r.logger.Tracef("update op: %#v aborted: %v", op, err)
@@ -384,7 +387,7 @@ func (r *Runner) applyInsert(op txn.Op, revno *int64) error {
 	} else if IsWriteConflict(err) {
 		r.logger.Tracef("insert op: %#v write conflict: %v", op, err)
 		return errWriteConflict
-	} else if mgo.IsDup(err) {
+	} else if mgo.IsDup(err) || mgo.IsTxnAborted(err) {
 		// This has triggered a server-side abort, so make sure the user
 		// understands the txn is aborted
 		r.logger.Tracef("insert op: %#v aborted: %v", op, err)
@@ -408,6 +411,11 @@ func (r *Runner) applyRemove(op txn.Op, revno *int64) error {
 	} else if IsWriteConflict(err) {
 		r.logger.Tracef("remove op: %#v write conflict: %v", op, err)
 		return errWriteConflict
+	} else if mgo.IsTxnAborted(err) {
+		// This has triggered a server-side abort, so make sure the user
+		// understands the txn is aborted
+		r.logger.Tracef("insert op: %#v aborted: %v", op, err)
+		return txn.ErrAborted
 	} else {
 		r.logger.Tracef("op %#v error: %v", op, err)
 		return err
@@ -440,7 +448,19 @@ func (r *Runner) updateLog(ops []txn.Op, revnos []int64, txnId bson.ObjectId) er
 		dr[0].Value = append(dr[0].Value.([]interface{}), op.Id)
 		dr[1].Value = append(dr[1].Value.([]int64), revnos[i])
 	}
-	if err := r.logCollection.Insert(logDoc); err != nil {
+	err := r.logCollection.Insert(logDoc)
+	if err == nil {
+		return nil
+	} else if IsWriteConflict(err) {
+		r.logger.Tracef("insert op: txn log write conflict: %v", err)
+		return errWriteConflict
+	} else if mgo.IsDup(err) || mgo.IsTxnAborted(err) {
+		// This has triggered a server-side abort, so make sure the user
+		// understands the txn is aborted
+		r.logger.Tracef("insert op: txn log aborted: %v", err)
+		return txn.ErrAborted
+	} else {
+		r.logger.Tracef("insert op txn log error: %v", err)
 		return err
 	}
 	return nil

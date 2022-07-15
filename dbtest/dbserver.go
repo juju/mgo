@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/juju/mgo/v2"
-	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v3"
+	"github.com/juju/mgo/v3/bson"
 	"gopkg.in/tomb.v2"
 )
 

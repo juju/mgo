@@ -32,8 +32,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/mgo/v2"
-	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v3"
+	"github.com/juju/mgo/v3/bson"
 	. "gopkg.in/check.v1"
 )
 
@@ -525,9 +525,12 @@ func (s *S) TestMultithreadedTransactionStartAbortAllActions(c *C) {
 	}()
 	possibleErrors := []string{
 		"^Transaction .* has been aborted\\.$",
-		"^Given transaction number .* does not match any in-progress transactions\\.$",
-		"^Cannot specify 'startTransaction' on transaction .* since it is already in progress\\.$",
-		"^Cannot start transaction .* on session .* because a newer transaction .* has already started\\.",
+		"^Given transaction number .* does not match any in-progress transactions.*$",
+		"^Cannot specify 'startTransaction' on transaction .* since it is already in progress.*$",
+		"^Cannot start transaction .* on session .* because a newer transaction .* has already started.*$",
+		"^Cannot start a transaction at given transaction number .* a transaction with the same number is in state TxnState::InProgress.*$",
+		"^Given transaction number .* does not match any in-progress transactions. The active transaction number is .*$",
+		"^WriteConflict error: this operation conflicted with another operation. Please retry your operation or multi-document transaction.*$",
 	}
 	timeoutRegex := "i/o timeout"
 	checkError := func(err error) {

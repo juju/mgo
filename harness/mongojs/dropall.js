@@ -11,7 +11,18 @@ if (db1.getDB("admin").serverBuildInfo().OpenSSLVersion) {
 for (var i in ports) {
     var port = ports[i]
     var server = "localhost:" + port
-    var mongo = new Mongo("localhost:" + port)
+    var mongo = null
+    for (var j = 0; j < 10; j++) {
+        try {
+            mongo = new Mongo("localhost:" + port)
+        } catch (err) {
+            if (j+1 == 10) {
+                throw err
+            }
+            print("failed to connect to " + server + " retrying in 1s ")
+            sleep(1000)
+        }
+    }
     var admin = mongo.getDB("admin")
 
     for (var j in auth) {

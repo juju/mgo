@@ -41,7 +41,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/mgo/v2/bson"
+	"github.com/juju/mgo/v3/bson"
 )
 
 type Mode int
@@ -160,8 +160,9 @@ type Iter struct {
 }
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrCursor   = errors.New("invalid cursor")
+	ErrNotFound      = errors.New("not found")
+	ErrCursor        = errors.New("invalid cursor")
+	ErrNoTransaction = errors.New("no transaction in progress")
 )
 
 const (
@@ -355,7 +356,19 @@ type DialInfo struct {
 	// first connecting and on follow up operations in the session. If
 	// timeout is zero, the call may block forever waiting for a connection
 	// to be established. Timeout does not affect logic in DialServer.
+	// Deprecated: Use SocketTimeout and SyncTimeout
 	Timeout time.Duration
+
+	// SyncTimeout sets the amount of time an operation with this session
+	// will wait before returning an error in case a connection to a usable
+	// server can't be established. Set it to zero to wait forever.
+	// SyncTimeout does not affect logic in DialServer.
+	SyncTimeout time.Duration
+
+	// SocketTimeout sets the amount of time to wait for a non-responding
+	// socket to the database before it is forcefully closed.
+	// SocketTimeout does not affect logic in DialServer.
+	SocketTimeout time.Duration
 
 	// FailFast will cause connection and query attempts to fail faster when
 	// the server is unavailable, instead of retrying until the configured
@@ -440,8 +453,14 @@ func DialWithInfo(info *DialInfo) (*Session, error) {
 		}
 		addrs[i] = addr
 	}
+	if info.SyncTimeout == time.Duration(0) {
+		info.SyncTimeout = info.Timeout
+	}
+	if info.SocketTimeout == time.Duration(0) {
+		info.SocketTimeout = info.Timeout
+	}
 	cluster := newCluster(addrs, info.Direct, info.FailFast, dialer{info.Dial, info.DialServer}, info.ReplicaSetName)
-	session := newSession(Eventual, cluster, info.Timeout)
+	session := newSession(Eventual, cluster, info.SyncTimeout, info.SocketTimeout)
 	session.defaultdb = info.Database
 	if session.defaultdb == "" {
 		session.defaultdb = "test"
@@ -539,12 +558,12 @@ func extractURL(s string) (*urlInfo, error) {
 	return info, nil
 }
 
-func newSession(consistency Mode, cluster *mongoCluster, timeout time.Duration) (session *Session) {
+func newSession(consistency Mode, cluster *mongoCluster, syncTimeout time.Duration, socketTimeout time.Duration) (session *Session) {
 	cluster.Acquire()
 	session = &Session{
 		cluster_:    cluster,
-		syncTimeout: timeout,
-		sockTimeout: timeout,
+		syncTimeout: syncTimeout,
+		sockTimeout: socketTimeout,
 		poolLimit:   4096,
 	}
 	debugf("New session %p on cluster %p", session, cluster)
@@ -2466,6 +2485,79 @@ func IsTxnAborted(err error) bool {
 	switch e := err.(type) {
 	case *QueryError:
 		return e.Code == 251
+	}
+	return false
+}
+
+// IsRetryable returns true when the error is a retryable error code.
+// These codes are from the Mongo Go Driver.
+func IsRetryable(err error) bool {
+	code := 0
+	switch e := err.(type) {
+	case *LastError:
+		code = e.Code
+	case *QueryError:
+		code = e.Code
+	case *BulkError:
+		for _, ecase := range e.ecases {
+			if !IsRetryable(ecase.Err) {
+				return false
+			}
+		}
+		return true
+	}
+	switch code {
+	case 6, 7, 89, 91, 189, 262, 9001, 10107, 11600, 11602, 13435, 13436:
+		return true
+	}
+	return false
+}
+
+// IsNotPrimaryError returns true when the error is one of the NotPrimaryError error codes.
+// See https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml
+func IsNotPrimaryError(err error) bool {
+	code := 0
+	switch e := err.(type) {
+	case *LastError:
+		code = e.Code
+	case *QueryError:
+		code = e.Code
+	case *BulkError:
+		for _, ecase := range e.ecases {
+			if !IsNotPrimaryError(ecase.Err) {
+				return false
+			}
+		}
+		return true
+	}
+	switch code {
+	case 189, 10107, 11602, 13435, 13436:
+		return true
+	}
+	return false
+}
+
+// IsSnapshotError is returned when a snapshot error is experienced, such as a
+// collection being written to was being modified or was very recently created.
+// A transaction should probably be rebuilt when this error is experienced.
+func IsSnapshotError(err error) bool {
+	code := 0
+	switch e := err.(type) {
+	case *LastError:
+		code = e.Code
+	case *QueryError:
+		code = e.Code
+	case *BulkError:
+		for _, ecase := range e.ecases {
+			if !IsSnapshotError(ecase.Err) {
+				return false
+			}
+		}
+		return true
+	}
+	switch code {
+	case 239, 246, 250, 272:
+		return true
 	}
 	return false
 }
@@ -4511,8 +4603,13 @@ func (s *Session) acquireSocket(slaveOk bool) (*mongoSocket, error) {
 		return s.masterSocket, nil
 	}
 
+	cluster := s.cluster_
+	if cluster == nil {
+		return nil, errors.New("Closed explicitly")
+	}
+
 	// Still not good.  We need a new socket.
-	sock, err := s.cluster().AcquireSocket(s.consistency, slaveOk && s.slaveOk, s.syncTimeout, s.sockTimeout, s.queryConfig.op.serverTags, s.poolLimit)
+	sock, err := cluster.AcquireSocket(s.consistency, slaveOk && s.slaveOk, s.syncTimeout, s.sockTimeout, s.queryConfig.op.serverTags, s.poolLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -4538,6 +4635,36 @@ func (s *Session) acquireSocket(slaveOk bool) (*mongoSocket, error) {
 	}
 
 	return sock, nil
+}
+
+// handleNotPrimaryWrite handles forcing a server sync when
+// the primary has changed.
+// It also aborts the current transaction.
+func (s *Session) handleNotPrimaryWrite(on *mongoSocket) {
+	if on == nil {
+		return
+	}
+	s.m.RLock()
+	if s.masterSocket == on {
+		// No chance to give the user an error
+		err := s.AbortTransaction()
+		if err != nil {
+			logf("abort during master socket lost: %v", err)
+		}
+	}
+	s.m.RUnlock()
+	s.m.Lock()
+	if s.masterSocket == on {
+		s.masterSocket.Release()
+		s.masterSocket = nil
+	}
+	s.m.Unlock()
+	s.m.RLock()
+	defer s.m.RUnlock()
+	if s.cluster_ == nil {
+		return
+	}
+	s.cluster_.syncServersAndWait()
 }
 
 // setSocket binds socket to this section.
@@ -4680,6 +4807,11 @@ func (c *Collection) writeOp(op interface{}, ordered bool) (lerr *LastError, err
 		return nil, err
 	}
 	defer socket.Release()
+	defer func() {
+		if IsNotPrimaryError(err) {
+			s.handleNotPrimaryWrite(socket)
+		}
+	}()
 
 	s.m.RLock()
 	safeOp := s.safeOp
@@ -4961,11 +5093,11 @@ func (s *Session) finishTransaction(command string) error {
 	s.m.RLock()
 	if len(s.sessionId.Data) == 0 {
 		s.m.RUnlock()
-		return errors.New("no transaction in progress")
+		return ErrNoTransaction
 	}
 	if s.transaction == nil {
 		s.m.RUnlock()
-		return errors.New("no transaction in progress")
+		return ErrNoTransaction
 	}
 	txn := s.transaction
 	sessionId := s.sessionId
@@ -4981,7 +5113,14 @@ func (s *Session) finishTransaction(command string) error {
 			{Name: "autocommit", Value: false},
 			{Name: "lsid", Value: bson.M{"id": sessionId}},
 		}
-		err = s.Run(cmd, nil)
+		// Mongo Go Driver retries commitTransaction and abortTransaction atleast once.
+		// https://github.com/mongodb/mongo-go-driver/blob/e00adfdc309ad83b7f5852e950555f516037ca81/mongo/session.go#L224
+		for i := 0; i < 2; i++ {
+			err = s.Run(cmd, nil)
+			if err == nil {
+				break
+			}
+		}
 	}
 	s.m.Lock()
 	if s.transaction == txn {

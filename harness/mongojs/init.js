@@ -19,8 +19,8 @@ var rs2cfg = {
 var rs3cfg = {
     _id: "rs3",
     members: [{ _id: 1, host: "127.0.0.1:40031", priority: 1, tags: { rs3: "a" } },
-    { _id: 2, host: "127.0.0.1:40032", priority: 0, tags: { rs3: "b" } },
-    { _id: 3, host: "127.0.0.1:40033", priority: 0, tags: { rs3: "c" } }],
+    { _id: 2, host: "127.0.0.1:40032", priority: 1, tags: { rs3: "b" } },
+    { _id: 3, host: "127.0.0.1:40033", priority: 1, tags: { rs3: "c" } }],
     settings: settings
 }
 
@@ -35,7 +35,7 @@ for (var i = 0; i != 60; i++) {
         cfg3 = new Mongo("127.0.0.1:40103").getDB("admin")
         break
     } catch (err) {
-        print("Can't connect yet...")
+        print("Can't connect yet... "+err)
     }
     sleep(1000)
 }
@@ -129,7 +129,7 @@ function addShard(adminDb, shardList) {
 
 function configShards() {
     s1 = new Mongo("127.0.0.1:40201").getDB("admin")
-    addShard(s1, ["127.0.0.1:40001", "rs1/127.0.0.1:40011"])
+    addShard(s1, ["rs1/127.0.0.1:40011"])
 
     s2 = new Mongo("127.0.0.1:40202").getDB("admin")
     addShard(s2, ["rs2/127.0.0.1:40021"])
