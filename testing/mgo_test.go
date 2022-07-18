@@ -6,16 +6,17 @@ package testing_test
 import (
 	"fmt"
 
-	"github.com/juju/testing"
+	jujutesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 
 	"github.com/juju/mgo/v3"
 	"github.com/juju/mgo/v3/bson"
+	"github.com/juju/mgo/v3/testing"
 )
 
 type mgoSuite struct {
-	testing.IsolationSuite
+	jujutesting.IsolationSuite
 	testing.MgoSuite
 }
 
