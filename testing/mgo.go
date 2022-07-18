@@ -33,11 +33,11 @@ import (
 	"github.com/juju/mgo/v2"
 	"github.com/juju/mgo/v2/bson"
 	"github.com/juju/retry"
+	jujutesting "github.com/juju/testing"
+	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils/v3"
 	"github.com/juju/version/v2"
 	gc "gopkg.in/check.v1"
-
-	jc "github.com/juju/testing/checkers"
 )
 
 var (
@@ -1038,7 +1038,7 @@ func (s *MgoSuite) TearDownTest(c *gc.C) {
 // proxied through a TCPProxy instance.
 type ProxiedSession struct {
 	*mgo.Session
-	*TCPProxy
+	*jujutesting.TCPProxy
 }
 
 // NewProxiedSession returns a ProxiedSession instance that holds a
@@ -1050,7 +1050,7 @@ type ProxiedSession struct {
 func NewProxiedSession(c *gc.C) *ProxiedSession {
 	mgoInfo := MgoServer.DialInfo()
 	c.Assert(mgoInfo.Addrs, gc.HasLen, 1)
-	proxy := NewTCPProxy(c, mgoInfo.Addrs[0])
+	proxy := jujutesting.NewTCPProxy(c, mgoInfo.Addrs[0])
 	mgoInfo.Addrs = []string{proxy.Addr()}
 	session, err := mgo.DialWithInfo(mgoInfo)
 	c.Assert(err, gc.IsNil)
@@ -1089,7 +1089,7 @@ type addrAlreadyInUseError struct {
 // IsolatedMgoSuite is a convenience type that combines the functionality
 // IsolationSuite and MgoSuite.
 type IsolatedMgoSuite struct {
-	IsolationSuite
+	jujutesting.IsolationSuite
 	MgoSuite
 }
 
