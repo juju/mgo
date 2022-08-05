@@ -152,6 +152,8 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err erro
 
 func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 	completed := false
+	// Force readPreference primary
+	r.db.Session.SetMode(mgo.Strong, true)
 	if err := r.db.Session.StartTransaction(); err != nil {
 		return err
 	}

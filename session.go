@@ -3314,6 +3314,8 @@ func prepareFindOp(socket *mongoSocket, op *queryOp, limit int32, txn *transacti
 	if txn != nil {
 		if startTxn {
 			find.StartTransaction = true
+			// TODO(sstxn): allow configuration of readConcern, for now we want to enforce the safest.
+			find.ReadConcern = bson.M{"level": "majority"}
 		}
 		find.TXNNumber = txn.number
 		find.LSID = bson.D{{Name: "id", Value: txn.sessionId}}
@@ -5116,7 +5118,20 @@ func (s *Session) finishTransaction(command string) error {
 		// Mongo Go Driver retries commitTransaction and abortTransaction atleast once.
 		// https://github.com/mongodb/mongo-go-driver/blob/e00adfdc309ad83b7f5852e950555f516037ca81/mongo/session.go#L224
 		for i := 0; i < 2; i++ {
-			err = s.Run(cmd, nil)
+			finalCmd := cmd
+			if command == "commitTransaction" {
+				finalCmd = append(bson.D(nil), cmd...)
+				if i == 0 {
+					// TODO(sstxn): allow setting initial writeConcern
+					finalCmd = append(finalCmd,
+						bson.DocElem{Name: "writeConcern", Value: bson.M{"w": "majority", "wtimeout": 1000}})
+				} else {
+					// Python driver sets wtime to 10000ms and writeConcern to majority after the first attempt.
+					finalCmd = append(finalCmd,
+						bson.DocElem{Name: "writeConcern", Value: bson.M{"w": "majority", "wtimeout": 10000}})
+				}
+			}
+			err = s.Run(finalCmd, nil)
 			if err == nil {
 				break
 			}
