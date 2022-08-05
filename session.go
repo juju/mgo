@@ -5120,16 +5120,14 @@ func (s *Session) finishTransaction(command string) error {
 		for i := 0; i < 2; i++ {
 			finalCmd := cmd
 			if command == "commitTransaction" {
-				finalCmd = append(bson.D(nil), cmd...)
-				if i == 0 {
-					// TODO(sstxn): allow setting initial writeConcern
-					finalCmd = append(finalCmd,
-						bson.DocElem{Name: "writeConcern", Value: bson.M{"w": "majority", "wtimeout": 1000}})
-				} else {
-					// Python driver sets wtime to 10000ms and writeConcern to majority after the first attempt.
-					finalCmd = append(finalCmd,
-						bson.DocElem{Name: "writeConcern", Value: bson.M{"w": "majority", "wtimeout": 10000}})
+				// TODO(sstxn): allow setting initial writeConcern
+				wtimeout := 1000
+				if i > 0 {
+					// Python driver sets wtimeout to 10000ms and writeConcern to majority after the first attempt.
+					wtimeout = 10000
 				}
+				finalCmd = append(finalCmd, bson.DocElem{Name: "writeConcern",
+					Value: bson.M{"w": "majority", "wtimeout": wtimeout}})
 			}
 			err = s.Run(finalCmd, nil)
 			if err == nil {
