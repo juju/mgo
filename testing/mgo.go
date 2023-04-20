@@ -297,6 +297,7 @@ func (inst *MgoInstance) run(vers version.Number) error {
 		"--dbpath", inst.dir,
 		"--port", mgoport,
 		"--oplogSize", "10",
+		"--bind_ip", "localhost",
 		"--ipv6",
 		"--setParameter", "enableTestCommands=1",
 		// You can set this if you want to see all queries that are
@@ -1074,7 +1075,7 @@ func (s *ProxiedSession) Close() {
 // We hope that the probability is small enough during
 // testing to be negligible.
 func FindTCPPort() int {
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		panic(err)
 	}
