@@ -26,6 +26,7 @@ package sstxn
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/juju/mgo/v3"
 	"github.com/juju/mgo/v3/bson"
@@ -53,6 +54,10 @@ func (nilLogger) Errorf(message string, args ...interface{})    {}
 func (nilLogger) Criticalf(message string, args ...interface{}) {}
 
 var _ Logger = nilLogger{}
+
+const TRANSACTION_TIMEOUT = 120 * time.Second
+
+var ErrTimeout = fmt.Errorf("transaction failed after retrying for 120 seconds")
 
 // A Runner applies operations as part of a transaction onto any number
 // of collections within a database. See the Run method for details.
@@ -106,6 +111,9 @@ func NewRunner(db *mgo.Database, logger Logger) *Runner {
 // Any number of transactions may be run concurrently, with one
 // runner or many.
 func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err error) {
+	timeout := time.NewTimer(TRANSACTION_TIMEOUT)
+	defer timeout.Stop()
+
 	const efmt = "error in transaction op %d: %s"
 	for i := range ops {
 		op := &ops[i]
@@ -133,21 +141,19 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err erro
 		id = bson.NewObjectId()
 	}
 
-	// Sometimes the mongo server will return an error code 112 (write conflict).
-	// This is a signal the transaction needs to be retried.
-	// We'll retry 3 times but not forever.
-	for i := 0; i < 3; i++ {
-		err = r.runTxn(ops, id)
-		if err == errWriteConflict {
-			r.logger.Tracef("attempt %d retrying txn ops", i)
-			continue
+	for {
+		err := r.runTxn(ops, id)
+		if err != errWriteConflict {
+			return err
 		}
-		break
+		select {
+		case <-timeout.C:
+			r.logger.Debugf("transaction failed after retrying for 120 seconds, ops '%+v'", ops)
+			return ErrTimeout
+		default:
+		}
+		r.logger.Tracef("retrying txn ops '%+v'", ops)
 	}
-	if err == errWriteConflict {
-		err = txn.ErrAborted
-	}
-	return err
 }
 
 func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
@@ -474,7 +480,7 @@ func (r *Runner) updateLog(ops []txn.Op, revnos []int64, txnId bson.ObjectId) er
 //
 // Saved documents are in the format:
 //
-//     {"_id": <txn id>, <collection>: {"d": [<doc id>, ...], "r": [<doc revno>, ...]}}
+//	{"_id": <txn id>, <collection>: {"d": [<doc id>, ...], "r": [<doc revno>, ...]}}
 //
 // The document revision is the value of the txn-revno field after
 // the change has been applied. Negative values indicate the document

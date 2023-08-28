@@ -787,7 +787,9 @@ func (s *S) TestConcurrentRemoveUpdatePostAssertFailure(c *C) {
 		Id:     0,
 		Remove: true,
 	}}, "", nil)
-	c.Assert(err, Equals, txn.ErrAborted)
+	// Since we are getting a WriteConflict, we retry for 120 seconds
+	// and then fail with timeout error.
+	c.Assert(err, Equals, sstxn.ErrTimeout)
 }
 
 type NotMarshallable struct {
