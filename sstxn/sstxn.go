@@ -24,9 +24,9 @@
 package sstxn
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/juju/mgo/v3"
 	"github.com/juju/mgo/v3/bson"
@@ -54,8 +54,6 @@ func (nilLogger) Errorf(message string, args ...interface{})    {}
 func (nilLogger) Criticalf(message string, args ...interface{}) {}
 
 var _ Logger = nilLogger{}
-
-const TRANSACTION_TIMEOUT = 120 * time.Second
 
 var ErrTimeout = fmt.Errorf("transaction failed after retrying for 120 seconds")
 
@@ -110,10 +108,7 @@ func NewRunner(db *mgo.Database, logger Logger) *Runner {
 //
 // Any number of transactions may be run concurrently, with one
 // runner or many.
-func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err error) {
-	timeout := time.NewTimer(TRANSACTION_TIMEOUT)
-	defer timeout.Stop()
-
+func (r *Runner) Run(ctx context.Context, ops []txn.Op, id bson.ObjectId, info interface{}) (err error) {
 	const efmt = "error in transaction op %d: %s"
 	for i := range ops {
 		op := &ops[i]
@@ -147,9 +142,9 @@ func (r *Runner) Run(ops []txn.Op, id bson.ObjectId, info interface{}) (err erro
 			return err
 		}
 		select {
-		case <-timeout.C:
-			r.logger.Debugf("transaction failed after retrying for 120 seconds, ops '%+v'", ops)
-			return ErrTimeout
+		case <-ctx.Done():
+			r.logger.Debugf("transaction cancelled by caller or timeout reached, ops '%+v'", ops)
+			return ctx.Err()
 		default:
 		}
 		r.logger.Tracef("retrying txn ops '%+v'", ops)
