@@ -170,6 +170,7 @@ func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 	}
 	var revnos []int64
 	if revs, err := r.checkAsserts(ops); err != nil {
+		r.logger.Criticalf("checkAsserts error: %v, %#v", err, ops)
 		return err
 	} else {
 		revnos = revs
@@ -178,14 +179,17 @@ func (r *Runner) runTxn(ops []txn.Op, id bson.ObjectId) error {
 		r.postAssertHook()
 	}
 	if err := r.applyOps(ops, revnos); err != nil {
+		r.logger.Criticalf("applyOps error: %v", err)
 		return err
 	}
 	if err := r.updateLog(ops, revnos, id); err != nil {
+		r.logger.Criticalf("updateLog error: %v", err)
 		return err
 	}
 	if err := r.db.Session.CommitTransaction(); mgo.IsTxnAborted(err) {
 		return txn.ErrAborted
 	} else if err != nil {
+		r.logger.Criticalf("CommitTransaction error: %v", err)
 		return err
 	}
 	completed = true
@@ -319,6 +323,7 @@ func (r *Runner) applyOps(ops []txn.Op, revnos []int64) error {
 			err = r.applyRemove(op, &revnos[i])
 		}
 		if err != nil {
+			r.logger.Criticalf("applyOps failed: %#v", op)
 			return err
 		}
 	}
@@ -474,7 +479,7 @@ func (r *Runner) updateLog(ops []txn.Op, revnos []int64, txnId bson.ObjectId) er
 //
 // Saved documents are in the format:
 //
-//     {"_id": <txn id>, <collection>: {"d": [<doc id>, ...], "r": [<doc revno>, ...]}}
+//	{"_id": <txn id>, <collection>: {"d": [<doc id>, ...], "r": [<doc revno>, ...]}}
 //
 // The document revision is the value of the txn-revno field after
 // the change has been applied. Negative values indicate the document
