@@ -54,6 +54,7 @@ type mongoSocket struct {
 	gotNonce      sync.Cond
 	dead          error
 	serverInfo    *mongoServerInfo
+	lastUsed      time.Time
 }
 
 type queryOpFlags uint32
@@ -233,6 +234,7 @@ func (socket *mongoSocket) InitialAcquire(serverInfo *mongoServerInfo, timeout t
 	stats.socketsInUse(+1)
 	stats.socketRefs(+1)
 	socket.Unlock()
+	socket.lastUsed = time.Now()
 	return nil
 }
 
@@ -250,6 +252,7 @@ func (socket *mongoSocket) Acquire() (info *mongoServerInfo) {
 	stats.socketRefs(+1)
 	serverInfo := socket.serverInfo
 	socket.Unlock()
+	socket.lastUsed = time.Now()
 	return serverInfo
 }
 

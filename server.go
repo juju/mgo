@@ -204,13 +204,47 @@ func (server *mongoServer) Close() {
 	}
 }
 
+// socketTimeout should be configurable with the dial options.
+const socketTimeout = time.Second * 30
+
 // RecycleSocket puts socket back into the unused cache.
+// If the socketTimeout is 0 or less, then we put back into the unused cache.
+// If the socketTimeout is greater than 0, then we close old sockets that have
+// been unused for longer than the socketTimeout, and only keep around the
+// sockets that are still fresh enough. A socket could still be closed with
+// active queries in flight, because the last used time is only set during
+// acquisition and not on packets sent.
 func (server *mongoServer) RecycleSocket(socket *mongoSocket) {
 	server.Lock()
-	if !server.closed {
-		server.unusedSockets = append(server.unusedSockets, socket)
+	defer server.Unlock()
+
+	if server.closed {
+		return
 	}
-	server.Unlock()
+
+	// If the socketTimeout is 0 or less, then we don't close old sockets,
+	// instead we just keep them around in the pool.
+	if socketTimeout <= 0 {
+		server.unusedSockets = append(server.unusedSockets, socket)
+		return
+	}
+
+	// This will prune any sockets that have been unused for longer than
+	// the socketTimeout.
+	watermark := time.Now().Add(-socketTimeout)
+
+	var sockets []*mongoSocket
+	for _, s := range server.unusedSockets {
+
+		// The socket is still fresh enough to keep, so keep it.
+		if !s.lastUsed.Before(watermark) {
+			sockets = append(sockets, s)
+			continue
+		}
+		// This socket is too old, close it.
+		s.Close()
+	}
+	server.unusedSockets = append(sockets, socket)
 }
 
 func removeSocket(sockets []*mongoSocket, socket *mongoSocket) []*mongoSocket {
