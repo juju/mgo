@@ -255,7 +255,7 @@ func (socket *mongoSocket) Acquire() (info *mongoServerInfo) {
 
 // Release decrements a socket reference. The socket will be
 // recycled once its released as many times as it's been acquired.
-func (socket *mongoSocket) Release() {
+func (socket *mongoSocket) Release(poolUnusedLimit int) {
 	socket.Lock()
 	if socket.references == 0 {
 		panic("socket.Release() with references == 0")
@@ -269,7 +269,7 @@ func (socket *mongoSocket) Release() {
 		socket.LogoutAll()
 		// If the socket is dead server is nil.
 		if server != nil {
-			server.RecycleSocket(socket)
+			server.RecycleSocket(socket, poolUnusedLimit)
 		}
 	} else {
 		socket.Unlock()
