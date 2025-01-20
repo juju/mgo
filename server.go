@@ -133,7 +133,7 @@ func (server *mongoServer) AcquireSocket(poolLimit int, timeout time.Duration) (
 				// closed in the meantime
 				if server.closed {
 					server.Unlock()
-					socket.Release()
+					socket.Release(0)
 					socket.Close()
 					return nil, abended, errServerClosed
 				}
@@ -205,12 +205,24 @@ func (server *mongoServer) Close() {
 }
 
 // RecycleSocket puts socket back into the unused cache.
-func (server *mongoServer) RecycleSocket(socket *mongoSocket) {
+func (server *mongoServer) RecycleSocket(socket *mongoSocket, poolUnusedLimit int) {
 	server.Lock()
-	if !server.closed {
-		server.unusedSockets = append(server.unusedSockets, socket)
+	defer server.Unlock()
+
+	if server.closed {
+		return
 	}
-	server.Unlock()
+
+	// If the number of unused sockets is too high, we just close this one.
+	// This won't close existing connections, and it's possible that we could
+	// still end up with a high watermark of unused sockets, but it should lead
+	// to a reduction if there is a sustained period of low usage.
+	if poolUnusedLimit > 0 && len(server.unusedSockets) > poolUnusedLimit {
+		socket.Close()
+		return
+	}
+
+	server.unusedSockets = append(server.unusedSockets, socket)
 }
 
 func removeSocket(sockets []*mongoSocket, socket *mongoSocket) []*mongoSocket {
@@ -319,7 +331,7 @@ func (server *mongoServer) pinger(loop bool) {
 					max = server.pingWindow[i]
 				}
 			}
-			socket.Release()
+			socket.Release(0)
 			server.Lock()
 			if server.closed {
 				loop = false
