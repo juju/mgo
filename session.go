@@ -3393,6 +3393,10 @@ type getMoreCmd struct {
 	Collection string `bson:"collection"`
 	BatchSize  int32  `bson:"batchSize,omitempty"`
 	MaxTimeMS  int64  `bson:"maxTimeMS,omitempty"`
+	LSID                bson.D      `bson:"lsid,omitempty"`
+	TXNNumber           int64       `bson:"txnNumber,omitempty"`
+	Autocommit          *bool       `bson:"autocommit,omitempty"`
+	StartTransaction    bool        `bson:"startTransaction,omitempty"`
 }
 
 // run duplicates the behavior of collection.Find(query).One(&result)
@@ -4095,10 +4099,17 @@ func (iter *Iter) getMoreCmd() *queryOp {
 		panic("invalid query collection name: " + iter.op.collection)
 	}
 
+	txn := iter.session.transaction
 	getMore := getMoreCmd{
 		CursorId:   iter.op.cursorId,
 		Collection: iter.op.collection[nameDot+1:],
 		BatchSize:  iter.op.limit,
+	}
+	if txn != nil {
+		getMore.TXNNumber = txn.number
+		getMore.LSID = bson.D{{Name: "id", Value: txn.sessionId}}
+		autocommit := false
+		getMore.Autocommit = &autocommit
 	}
 
 	var op queryOp
