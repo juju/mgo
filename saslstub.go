@@ -1,4 +1,5 @@
-//+build !sasl
+//go:build !sasl
+// +build !sasl
 
 package mgo
 

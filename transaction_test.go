@@ -509,7 +509,7 @@ func (s *S) TestIterWithMoreThanBatchOutsideTransaction(c *C) {
 	}
 	c.Assert(iter.Close(), IsNil)
 	var missing []int
-	for idx, b := range(found) {
+	for idx, b := range found {
 		if !b {
 			missing = append(missing, idx)
 		}
@@ -538,7 +538,7 @@ func (s *S) TestIterWithMoreThanBatchInTransaction(c *C) {
 	}
 	c.Assert(iter.Close(), IsNil)
 	var missing []int
-	for idx, b := range(found) {
+	for idx, b := range found {
 		if !b {
 			missing = append(missing, idx)
 		}
