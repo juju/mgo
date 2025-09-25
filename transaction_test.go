@@ -489,6 +489,64 @@ func (s *S) TestCloneDifferentSessionTransaction(c *C) {
 	c.Check(res, DeepEquals, bson.M{"a": "second", "b": "c"})
 }
 
+func (s *S) TestIterWithMoreThanBatchOutsideTransaction(c *C) {
+	session1, coll1 := s.setupTxnSessionAndCollection(c)
+	defer session1.Close()
+	const maxCount = 200
+	for i := 0; i < maxCount; i++ {
+		c.Assert(coll1.Insert(bson.M{"a": i}), IsNil)
+	}
+	count, err := coll1.Find(nil).Count()
+	c.Assert(err, IsNil)
+	c.Check(count, Equals, maxCount)
+	found := make([]bool, maxCount)
+	iter := coll1.Find(nil).Iter()
+	var doc struct {
+		A int
+	}
+	for iter.Next(&doc) {
+		found[doc.A] = true
+	}
+	c.Assert(iter.Close(), IsNil)
+	var missing []int
+	for idx, b := range(found) {
+		if !b {
+			missing = append(missing, idx)
+		}
+	}
+	c.Assert(missing, DeepEquals, []int(nil))
+}
+
+func (s *S) TestIterWithMoreThanBatchInTransaction(c *C) {
+	session1, coll1 := s.setupTxnSessionAndCollection(c)
+	defer session1.Close()
+	const maxCount = 200
+	for i := 0; i < maxCount; i++ {
+		c.Assert(coll1.Insert(bson.M{"a": i}), IsNil)
+	}
+	count, err := coll1.Find(nil).Count()
+	c.Assert(err, IsNil)
+	c.Check(count, Equals, maxCount)
+	found := make([]bool, maxCount)
+	c.Assert(session1.StartTransaction(), IsNil)
+	iter := coll1.Find(nil).Iter()
+	var doc struct {
+		A int
+	}
+	for iter.Next(&doc) {
+		found[doc.A] = true
+	}
+	c.Assert(iter.Close(), IsNil)
+	var missing []int
+	for idx, b := range(found) {
+		if !b {
+			missing = append(missing, idx)
+		}
+	}
+	c.Assert(missing, DeepEquals, []int(nil))
+	c.Assert(session1.CommitTransaction(), IsNil)
+}
+
 func (s *S) TestMultithreadedTransactionStartAbortAllActions(c *C) {
 	session, coll := s.setupTxnSessionAndCollection(c)
 	defer session.Close()
