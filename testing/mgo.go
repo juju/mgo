@@ -171,6 +171,18 @@ func (inst *MgoInstance) Destroy() {
 	inst.current = nil
 }
 
+// DestroyWithLog causes mongod to exit, cleans up its data directory,
+// and captures the last N lines of mongod's log output.
+func (inst *MgoInstance) DestroyWithLog() {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+	if inst.current == nil {
+		return
+	}
+	inst.current.DestroyWithLog()
+	inst.current = nil
+}
+
 // DestroyAll kills all mongod spawned here.
 func (inst *MgoInstance) DestroyAll() {
 	inst.currentLock.Lock()
