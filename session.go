@@ -444,12 +444,14 @@ func (addr *ServerAddr) TCPAddr() *net.TCPAddr {
 func DialWithInfo(info *DialInfo) (*Session, error) {
 	addrs := make([]string, len(info.Addrs))
 	for i, addr := range info.Addrs {
-		p := strings.LastIndexAny(addr, "]:")
-		if p == -1 || addr[p] != ':' {
-			// XXX This is untested. The test suite doesn't use the standard port.
-			addr += ":27017"
+		_, _, err := net.SplitHostPort(addr)
+		if err == nil {
+			addrs[i] = addr
+		} else if strings.Contains(err.Error(), "missing port in address") {
+			addrs[i] = net.JoinHostPort(addr, "27017")
+		} else {
+			return nil, err
 		}
-		addrs[i] = addr
 	}
 	if info.SyncTimeout == time.Duration(0) {
 		info.SyncTimeout = info.Timeout

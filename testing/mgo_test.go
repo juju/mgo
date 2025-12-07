@@ -4,7 +4,8 @@
 package testing_test
 
 import (
-	"fmt"
+	"net"
+	"strconv"
 
 	jujutesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
@@ -83,7 +84,7 @@ func (s *mgoSuite) TestStartAndClean(c *gc.C) {
 
 func (s *mgoSuite) TestStartIPv6(c *gc.C) {
 	info := testing.MgoServer.DialInfo()
-	info.Addrs = []string{fmt.Sprintf("[::1]:%v", testing.MgoServer.Port())}
+	info.Addrs = []string{net.JoinHostPort("::1", strconv.Itoa(testing.MgoServer.Port()))}
 	session, err := mgo.DialWithInfo(info)
 	c.Assert(err, gc.IsNil)
 	session.Close()

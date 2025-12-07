@@ -27,6 +27,8 @@
 package mgo
 
 import (
+	"net"
+	"strconv"
 	"sync"
 )
 
@@ -42,6 +44,17 @@ func GetStats() Stats {
 	return stats
 }
 
+// GetStatsForPort returns the stats for a specific server port, useful in tests.
+func GetStatsForPort(port int) StatsByPort {
+	stats.mu.RLock()
+	defer stats.mu.RUnlock()
+	s, _ := stats.ByPort[port]
+	if s != nil {
+		return *s
+	}
+	return StatsByPort{}
+}
+
 func ResetStats() {
 	// If we call ResetStats we assume you want to use stats, so we enable
 	// them.
@@ -52,6 +65,8 @@ func ResetStats() {
 type Stats struct {
 	mu      sync.RWMutex
 	enabled bool
+
+	ByPort map[int]*StatsByPort
 
 	Clusters     int
 	MasterConns  int
@@ -64,9 +79,35 @@ type Stats struct {
 	SocketRefs   int
 }
 
+type StatsByPort struct {
+	Clusters     int
+	MasterConns  int
+	SlaveConns   int
+	SentOps      int
+	ReceivedOps  int
+	ReceivedDocs int
+	SocketsAlive int
+	SocketsInUse int
+	SocketRefs   int
+}
+
+func (stats *Stats) lockedStatsByPort(port int) *StatsByPort {
+	if stats.ByPort == nil {
+		stats.ByPort = make(map[int]*StatsByPort)
+	}
+	s, ok := stats.ByPort[port]
+	if !ok {
+		s = &StatsByPort{}
+		stats.ByPort[port] = s
+	}
+	return s
+}
+
 func (stats *Stats) reset(enabled bool) {
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
+
+	stats.ByPort = nil
 
 	stats.MasterConns = 0
 	stats.SlaveConns = 0
@@ -84,54 +125,69 @@ func (stats *Stats) reset(enabled bool) {
 	}
 }
 
-func (stats *Stats) cluster(delta int) {
+func (stats *Stats) cluster(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).Clusters += delta
 	stats.Clusters += delta
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) conn(delta int, master bool) {
+func (stats *Stats) conn(delta int, master bool, port int) {
 	stats.mu.Lock()
 	if master {
+		stats.lockedStatsByPort(port).MasterConns += delta
 		stats.MasterConns += delta
 	} else {
+		stats.lockedStatsByPort(port).SlaveConns += delta
 		stats.SlaveConns += delta
 	}
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) sentOps(delta int) {
+func (stats *Stats) sentOps(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).SentOps += delta
 	stats.SentOps += delta
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) receivedOps(delta int) {
+func (stats *Stats) receivedOps(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).ReceivedOps += delta
 	stats.ReceivedOps += delta
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) receivedDocs(delta int) {
+func (stats *Stats) receivedDocs(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).ReceivedDocs += delta
 	stats.ReceivedDocs += delta
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) socketsInUse(delta int) {
+func (stats *Stats) socketsInUse(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).SocketsInUse += delta
 	stats.SocketsInUse += delta
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) socketsAlive(delta int) {
+func (stats *Stats) socketsAlive(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).SocketsAlive += delta
 	stats.SocketsAlive += delta
 	stats.mu.Unlock()
 }
 
-func (stats *Stats) socketRefs(delta int) {
+func (stats *Stats) socketRefs(delta int, port int) {
 	stats.mu.Lock()
+	stats.lockedStatsByPort(port).SocketRefs += delta
 	stats.SocketRefs += delta
 	stats.mu.Unlock()
+}
+
+func statsPort(addr string) int {
+	_, strPort, _ := net.SplitHostPort(addr)
+	intPort, _ := strconv.Atoi(strPort)
+	return intPort
 }

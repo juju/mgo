@@ -83,6 +83,279 @@ type Certs struct {
 }
 
 type MgoInstance struct {
+	killAll chan struct{}
+
+	poolWg sync.WaitGroup
+	pool   chan *mgoServer
+
+	currentLock sync.RWMutex
+	current     *mgoServer
+
+	certs *Certs
+
+	// Params is a list of additional parameters that will be passed to
+	// the mongod application
+	Params []string
+
+	// EnableReplicaSet will pass the right parameters to --replSet and call
+	// replSetInitiate when appropriate.
+	EnableReplicaSet bool
+
+	// EnableAuth enables authentication/authorization.
+	EnableAuth bool
+
+	// WithoutV8 is true if we believe this Mongo doesn't actually have the
+	// V8 engine
+	WithoutV8 bool
+
+	// MaxTransactionLockRequestTimeout is used for the mongo
+	// maxTransactionLockRequestTimeoutMillis server setting (v4+).
+	MaxTransactionLockRequestTimeout time.Duration
+}
+
+func (inst *MgoInstance) check() bool {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	return inst.current != nil && inst.current.addr != ""
+}
+
+// Addr returns the address of the MongoDB server.
+func (inst *MgoInstance) Addr() string {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		return ""
+	}
+	return inst.current.Addr()
+}
+
+// Port returns the port of the MongoDB server.
+func (inst *MgoInstance) Port() int {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		return 0
+	}
+	return inst.current.Port()
+}
+
+// SSLEnabled reports whether or not SSL is enabled for the MongoDB server.
+func (inst *MgoInstance) SSLEnabled() bool {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		return false
+	}
+	return inst.current.SSLEnabled()
+}
+
+// Start starts the MongoDB server.
+func (inst *MgoInstance) Start(certs *Certs) error {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+	if inst.current == nil {
+		inst.needServer()
+	}
+	inst.certs = certs
+	return inst.current.Start(certs)
+}
+
+// Destroy kills mongod and cleans up its data directory.
+func (inst *MgoInstance) Destroy() {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+	if inst.current == nil {
+		return
+	}
+	inst.current.Destroy()
+	inst.current = nil
+}
+
+// DestroyAll kills all mongod spawned here.
+func (inst *MgoInstance) DestroyAll() {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+
+	close(inst.killAll)
+
+	if inst.current != nil {
+		inst.current.Destroy()
+		inst.current = nil
+	}
+
+	inst.poolWg.Wait()
+	inst.killAll = nil
+}
+
+// Restart restarts the mongo server, useful for
+// testing what happens when a state server goes down.
+func (inst *MgoInstance) Restart() {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		panic("no server")
+	}
+	inst.current.Restart()
+}
+
+// MustDial returns a new connection to the MongoDB server, panicking on error.
+func (inst *MgoInstance) MustDial() *mgo.Session {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		panic("no server")
+	}
+	return inst.current.MustDial()
+}
+
+// Dial returns a new connection to the MongoDB server.
+func (inst *MgoInstance) Dial() (*mgo.Session, error) {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		panic("no server")
+	}
+	return inst.current.Dial()
+}
+
+// DialInfo returns information suitable for dialling the
+// receiving MongoDB instance.
+func (inst *MgoInstance) DialInfo() *mgo.DialInfo {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		panic("no server")
+	}
+	return inst.current.DialInfo()
+}
+
+// DialDirect returns a new direct connection to the shared MongoDB server. This
+// must be used if you're connecting to a replicaset that hasn't been initiated
+// yet.
+func (inst *MgoInstance) DialDirect() (*mgo.Session, error) {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		panic("no server")
+	}
+	return inst.current.DialDirect()
+}
+
+// MustDialDirect works like DialDirect, but panics on errors.
+func (inst *MgoInstance) MustDialDirect() *mgo.Session {
+	inst.currentLock.RLock()
+	defer inst.currentLock.RUnlock()
+	if inst.current == nil {
+		panic("no server")
+	}
+	return inst.current.MustDialDirect()
+}
+
+// Reset resets the MongoDB server to a clean state.
+func (inst *MgoInstance) Reset() error {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+	if inst.current != nil {
+		server := inst.current
+		killAll := inst.killAll
+		inst.current = nil
+		inst.poolWg.Add(1)
+		go func() {
+			defer inst.poolWg.Done()
+			logger.Debugf("hard-resetting mongod %v", server.addr)
+			err := server.Reset()
+			if err != nil {
+				server.Destroy()
+				logger.Errorf("hard-resetting mongod %v: %v", server.addr, err)
+				return
+			}
+			select {
+			case inst.pool <- server:
+			case <-killAll:
+				server.Destroy()
+			}
+		}()
+	}
+	inst.needServer()
+	err := inst.current.EnsureRunning()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (inst *MgoInstance) softReset() {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+	if inst.current == nil {
+		return
+	}
+	server := inst.current
+	killAll := inst.killAll
+	inst.current = nil
+	inst.poolWg.Add(1)
+	go func() {
+		defer inst.poolWg.Done()
+		logger.Debugf("resetting mongod %v", server.addr)
+		session, err := server.Dial()
+		if err != nil {
+			server.Destroy()
+			logger.Errorf("resetting mongod %v: %v", server.addr, err)
+			return
+		}
+		// Rather than dropping the databases (which is very slow in Mongo
+		// 3.2) we clear all of the collections.
+		err = clearDatabases(session)
+		session.Close()
+		if err != nil {
+			server.Destroy()
+			logger.Errorf("resetting mongod %v: %v", server.addr, err)
+			return
+		}
+		select {
+		case inst.pool <- server:
+		case <-killAll:
+			server.Destroy()
+		}
+	}()
+	inst.needServer()
+	err := inst.current.EnsureRunning()
+	if err != nil {
+		panic(err)
+	}
+}
+
+// EnsureRunning ensures the MongoDB server is running.
+func (inst *MgoInstance) EnsureRunning() error {
+	inst.currentLock.Lock()
+	defer inst.currentLock.Unlock()
+	if inst.current == nil {
+		inst.needServer()
+	}
+	return inst.current.EnsureRunning()
+}
+
+func (inst *MgoInstance) needServer() {
+	select {
+	case server := <-inst.pool:
+		logger.Debugf("re-using pooled mongod %v", server.addr)
+		inst.current = server
+	default:
+		if inst.killAll == nil {
+			inst.killAll = make(chan struct{})
+		}
+		inst.current = &mgoServer{
+			Params:                           append([]string(nil), inst.Params...),
+			EnableReplicaSet:                 inst.EnableReplicaSet,
+			EnableAuth:                       inst.EnableAuth,
+			WithoutV8:                        inst.WithoutV8,
+			MaxTransactionLockRequestTimeout: inst.MaxTransactionLockRequestTimeout,
+			certs:                            inst.certs,
+		}
+	}
+}
+
+type mgoServer struct {
 	// addr holds the address of the MongoDB server
 	addr string
 
@@ -122,17 +395,17 @@ type MgoInstance struct {
 }
 
 // Addr returns the address of the MongoDB server.
-func (m *MgoInstance) Addr() string {
+func (m *mgoServer) Addr() string {
 	return m.addr
 }
 
 // Port returns the port of the MongoDB server.
-func (m *MgoInstance) Port() int {
+func (m *mgoServer) Port() int {
 	return m.port
 }
 
 // SSLEnabled reports whether or not SSL is enabled for the MongoDB server.
-func (m *MgoInstance) SSLEnabled() bool {
+func (m *mgoServer) SSLEnabled() bool {
 	return m.certs != nil
 }
 
@@ -209,7 +482,7 @@ func getHome() (string, error) {
 }
 
 // Start starts a MongoDB server in a temporary directory.
-func (inst *MgoInstance) Start(certs *Certs) error {
+func (inst *mgoServer) Start(certs *Certs) error {
 	var err error
 	mongopath, vers, err := installedMongod.Get()
 	if err != nil {
@@ -287,7 +560,7 @@ func (inst *MgoInstance) Start(certs *Certs) error {
 
 // run runs the MongoDB server at the
 // address and directory already configured.
-func (inst *MgoInstance) run(vers version.Number) error {
+func (inst *mgoServer) run(vers version.Number) error {
 	if inst.server != nil {
 		panic("mongo server is already running")
 	}
@@ -297,8 +570,8 @@ func (inst *MgoInstance) run(vers version.Number) error {
 		"--dbpath", inst.dir,
 		"--port", mgoport,
 		"--oplogSize", "10",
-		"--bind_ip", "localhost",
 		"--ipv6",
+		"--bind_ip", "localhost,::1",
 		"--setParameter", "enableTestCommands=1",
 		// You can set this if you want to see all queries that are
 		// being run against Mongodb. We don't enable it by default
@@ -527,14 +800,14 @@ func detectMongoVersion(mongoPath string) (version.Number, error) {
 	return ver, nil
 }
 
-func (inst *MgoInstance) kill(sig os.Signal) {
+func (inst *mgoServer) kill(sig os.Signal) {
 	inst.server.Process.Signal(sig)
 	<-inst.exited
 	inst.server = nil
 	inst.exited = nil
 }
 
-func (inst *MgoInstance) killAndCleanup(sig os.Signal) {
+func (inst *mgoServer) killAndCleanup(sig os.Signal) {
 	if inst.server != nil {
 		logger.Debugf("killing mongod pid %d in %s on port %d with %s", inst.server.Process.Pid, inst.dir, inst.port, sig)
 		inst.kill(sig)
@@ -544,13 +817,13 @@ func (inst *MgoInstance) killAndCleanup(sig os.Signal) {
 }
 
 // Destroy kills mongod and cleans up its data directory.
-func (inst *MgoInstance) Destroy() {
+func (inst *mgoServer) Destroy() {
 	inst.killAndCleanup(os.Kill)
 }
 
 // Restart restarts the mongo server, useful for
 // testing what happens when a state server goes down.
-func (inst *MgoInstance) Restart() {
+func (inst *mgoServer) Restart() {
 	logger.Debugf("restarting mongod pid %d in %s on port %d", inst.server.Process.Pid, inst.dir, inst.port)
 	inst.kill(os.Kill)
 	if err := inst.Start(inst.certs); err != nil {
@@ -565,7 +838,7 @@ func MgoTestPackage(t *testing.T, certs *Certs) {
 	if err := MgoServer.Start(certs); err != nil {
 		t.Fatal(err)
 	}
-	defer MgoServer.Destroy()
+	defer MgoServer.DestroyAll()
 	gc.TestingT(t)
 }
 
@@ -584,7 +857,7 @@ func (s *MgoSuite) SetUpSuite(c *gc.C) {
 		mgo.SetLogger(&mgoLogger{loggo.GetLogger("mgo")})
 		mgo.SetDebug(true)
 	}
-	if MgoServer.addr == "" {
+	if !MgoServer.check() {
 		c.Fatalf("No Mongo Server Address, MgoSuite tests must be run with MgoTestPackage")
 	}
 	mgo.SetStats(true)
@@ -652,7 +925,7 @@ func (s *MgoSuite) TearDownSuite(c *gc.C) {
 
 // MustDial returns a new connection to the MongoDB server, and panics on
 // errors.
-func (inst *MgoInstance) MustDial() *mgo.Session {
+func (inst *mgoServer) MustDial() *mgo.Session {
 	s, err := mgo.DialWithInfo(inst.DialInfo())
 	if err != nil {
 		panic(err)
@@ -661,7 +934,7 @@ func (inst *MgoInstance) MustDial() *mgo.Session {
 }
 
 // Dial returns a new connection to the MongoDB server.
-func (inst *MgoInstance) Dial() (*mgo.Session, error) {
+func (inst *mgoServer) Dial() (*mgo.Session, error) {
 	var session *mgo.Session
 	err := retry.Call(retry.CallArgs{
 		Func: func() error {
@@ -683,21 +956,21 @@ func (inst *MgoInstance) Dial() (*mgo.Session, error) {
 
 // DialInfo returns information suitable for dialling the
 // receiving MongoDB instance.
-func (inst *MgoInstance) DialInfo() *mgo.DialInfo {
+func (inst *mgoServer) DialInfo() *mgo.DialInfo {
 	return MgoDialInfo(inst.certs, inst.addr)
 }
 
 // DialDirect returns a new direct connection to the shared MongoDB server. This
 // must be used if you're connecting to a replicaset that hasn't been initiated
 // yet.
-func (inst *MgoInstance) DialDirect() (*mgo.Session, error) {
+func (inst *mgoServer) DialDirect() (*mgo.Session, error) {
 	info := inst.DialInfo()
 	info.Direct = true
 	return mgo.DialWithInfo(info)
 }
 
 // MustDialDirect works like DialDirect, but panics on errors.
-func (inst *MgoInstance) MustDialDirect() *mgo.Session {
+func (inst *mgoServer) MustDialDirect() *mgo.Session {
 	session, err := inst.DialDirect()
 	if err != nil {
 		panic(err)
@@ -718,7 +991,7 @@ func MgoDialInfo(certs *Certs, addrs ...string) *mgo.DialInfo {
 			ServerName: "anything",
 		}
 		dial = func(addr net.Addr) (net.Conn, error) {
-			conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+			conn, err := tls.Dial(addr.Network(), addr.String(), tlsConfig)
 			if err != nil {
 				logger.Debugf("tls.Dial(%s) failed with %v", addr, err)
 				return nil, err
@@ -727,7 +1000,7 @@ func MgoDialInfo(certs *Certs, addrs ...string) *mgo.DialInfo {
 		}
 	} else {
 		dial = func(addr net.Addr) (net.Conn, error) {
-			conn, err := net.Dial("tcp", addr.String())
+			conn, err := net.Dial(addr.Network(), addr.String())
 			if err != nil {
 				logger.Debugf("net.Dial(%s) failed with %v", addr, err)
 				return nil, err
@@ -863,7 +1136,7 @@ func (s *MgoSuite) SetUpTest(c *gc.C) {
 }
 
 // Reset deletes all content from the MongoDB server.
-func (inst *MgoInstance) Reset() error {
+func (inst *mgoServer) Reset() error {
 	err := inst.EnsureRunning()
 	if err != nil {
 		return errors.Trace(err)
@@ -977,7 +1250,7 @@ func isUnauthorized(err error) bool {
 	return false
 }
 
-func (inst *MgoInstance) EnsureRunning() error {
+func (inst *mgoServer) EnsureRunning() error {
 	// If the server has already been destroyed for testing purposes,
 	// just start it again.
 	if inst.Addr() == "" {
@@ -1013,17 +1286,17 @@ func (s *MgoSuite) TearDownTest(c *gc.C) {
 		c.Assert(err, jc.ErrorIsNil)
 	}
 
-	if !s.SkipTestCleanup {
-		// Rather than dropping the databases (which is very slow in Mongo
-		// 3.2) we clear all of the collections.
-		err = clearDatabases(s.Session)
-		c.Assert(err, jc.ErrorIsNil)
-	}
 	s.Session.Close()
 	s.Session = nil
 
+	addr := MgoServer.Addr()
+	_, port, err := net.SplitHostPort(addr)
+	c.Assert(err, gc.IsNil)
+	statsPort, err := strconv.Atoi(port)
+	c.Assert(err, gc.IsNil)
+
 	for i := 0; ; i++ {
-		stats := mgo.GetStats()
+		stats := mgo.GetStatsForPort(statsPort)
 		if stats.SocketsInUse == 0 && stats.SocketsAlive == 0 {
 			break
 		}
@@ -1032,6 +1305,10 @@ func (s *MgoSuite) TearDownTest(c *gc.C) {
 		}
 		c.Logf("Waiting for sockets to die: %d in use, %d alive", stats.SocketsInUse, stats.SocketsAlive)
 		time.Sleep(500 * time.Millisecond)
+	}
+
+	if !s.SkipTestCleanup {
+		MgoServer.softReset()
 	}
 }
 

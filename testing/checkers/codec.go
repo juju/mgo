@@ -54,8 +54,8 @@ func (checker *codecEqualChecker) Check(params []interface{}, names []string) (r
 		return false, fmt.Sprintf("cannot unmarshal obtained contents: %v; %q", err, gotContent)
 	}
 
-	if ok, err := DeepEqual(gotContentVal, expectContentVal); !ok {
-		return false, err.Error()
+	if ok, err := gc.DeepEquals.Check([]any{gotContentVal, expectContentVal}, gc.DeepEquals.Info().Params); !ok {
+		return false, err
 	}
 	return true, ""
 }

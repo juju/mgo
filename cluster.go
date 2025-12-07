@@ -61,6 +61,7 @@ type mongoCluster struct {
 	cachedIndex  map[string]bool
 	sync         chan bool
 	dial         dialer
+	statsPort    int
 }
 
 func newCluster(userSeeds []string, direct, failFast bool, dial dialer, setName string) *mongoCluster {
@@ -74,7 +75,10 @@ func newCluster(userSeeds []string, direct, failFast bool, dial dialer, setName 
 	}
 	cluster.serverSynced.L = cluster.RWMutex.RLocker()
 	cluster.sync = make(chan bool, 1)
-	stats.cluster(+1)
+	if len(userSeeds) > 0 {
+		cluster.statsPort = statsPort(userSeeds[0])
+	}
+	stats.cluster(+1, cluster.statsPort)
 	go cluster.syncServersLoop()
 	return cluster
 }
@@ -102,7 +106,7 @@ func (cluster *mongoCluster) Release() {
 		}
 		// Wake up the sync loop so it can die.
 		cluster.syncServers()
-		stats.cluster(-1)
+		stats.cluster(-1, cluster.statsPort)
 	}
 	cluster.Unlock()
 }
@@ -213,8 +217,9 @@ func (cluster *mongoCluster) syncServer(server *mongoServer) (info *mongoServerI
 		debugf("SYNC %s is a master.", addr)
 		if !server.info.Master {
 			// Made an incorrect assumption above, so fix stats.
-			stats.conn(-1, false)
-			stats.conn(+1, true)
+			sp := statsPort(addr)
+			stats.conn(-1, false, sp)
+			stats.conn(+1, true, sp)
 		}
 	} else if result.Secondary {
 		debugf("SYNC %s is a slave.", addr)
