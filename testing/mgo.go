@@ -268,6 +268,13 @@ func (inst *MgoInstance) Reset() error {
 	inst.currentLock.Lock()
 	defer inst.currentLock.Unlock()
 	if inst.current != nil {
+		stats := mgo.GetStatsForPort(inst.current.port)
+		if stats.SocketsInUse != 0 || stats.SocketsAlive != 0 {
+			// Still has active connections, reset in place.
+			logger.Debugf("hard-resetting mongod %v in-place", inst.current.addr)
+			return inst.current.Reset()
+		}
+
 		server := inst.current
 		killAll := inst.killAll
 		inst.current = nil
@@ -348,6 +355,9 @@ func (inst *MgoInstance) EnsureRunning() error {
 }
 
 func (inst *MgoInstance) needServer() {
+	if inst.pool == nil {
+		inst.pool = make(chan *mgoServer)
+	}
 	select {
 	case server := <-inst.pool:
 		logger.Debugf("re-using pooled mongod %v", server.addr)
