@@ -107,7 +107,13 @@ func (stats *Stats) reset(enabled bool) {
 	stats.mu.Lock()
 	defer stats.mu.Unlock()
 
-	stats.ByPort = nil
+	for _, sbp := range stats.ByPort {
+		sbp.MasterConns = 0
+		sbp.SlaveConns = 0
+		sbp.SentOps = 0
+		sbp.ReceivedOps = 0
+		sbp.ReceivedDocs = 0
+	}
 
 	stats.MasterConns = 0
 	stats.SlaveConns = 0
@@ -122,6 +128,8 @@ func (stats *Stats) reset(enabled bool) {
 		stats.SocketsInUse = 0
 		stats.SocketsAlive = 0
 		stats.SocketRefs = 0
+
+		stats.ByPort = nil
 	}
 }
 
