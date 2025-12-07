@@ -55,6 +55,7 @@ type mongoSocket struct {
 	dead          error
 	serverInfo    *mongoServerInfo
 	statsPort     int
+	statAlive     int
 }
 
 type queryOpFlags uint32
@@ -191,6 +192,7 @@ func newSocket(server *mongoServer, conn net.Conn, timeout time.Duration) *mongo
 	if err := socket.InitialAcquire(server.Info(), timeout); err != nil {
 		panic("newSocket: InitialAcquire returned error: " + err.Error())
 	}
+	socket.statAlive++
 	stats.socketsAlive(+1, socket.statsPort)
 	debugf("Socket %p to %s: initialized", socket, socket.addr)
 	socket.resetNonce()
@@ -329,7 +331,8 @@ func (socket *mongoSocket) kill(err error, abend bool) {
 	logf("Socket %p to %s: closing: %s (abend=%v)", socket, socket.addr, err.Error(), abend)
 	socket.dead = err
 	socket.conn.Close()
-	stats.socketsAlive(-1, socket.statsPort)
+	stats.socketsAlive(-socket.statAlive, socket.statsPort)
+	socket.statAlive = 0
 	replyFuncs := socket.replyFuncs
 	socket.replyFuncs = make(map[uint32]replyFunc)
 	server := socket.server
