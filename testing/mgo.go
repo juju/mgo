@@ -1329,11 +1329,13 @@ func (s *MgoSuite) TearDownTest(c *gc.C) {
 		if stats.SocketsInUse == 0 && stats.SocketsAlive == 0 {
 			break
 		}
-		if i == 20 {
+		if i == 1000 {
 			c.Fatal("Test left sockets in a dirty state")
 		}
-		c.Logf("Waiting for sockets to die: %d in use, %d alive", stats.SocketsInUse, stats.SocketsAlive)
-		time.Sleep(500 * time.Millisecond)
+		if i%50 == 0 {
+			c.Logf("Waiting for sockets to die: %d in use, %d alive", stats.SocketsInUse, stats.SocketsAlive)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if !s.SkipTestCleanup {
