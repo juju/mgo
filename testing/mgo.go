@@ -823,7 +823,14 @@ func detectMongoVersion(mongoPath string) (version.Number, error) {
 }
 
 func (inst *mgoServer) kill(sig os.Signal) {
-	inst.server.Process.Signal(sig)
+	inst.server.Process.Signal(os.Interrupt)
+	if sig != os.Interrupt {
+		select {
+		case <-inst.exited:
+		case <-time.After(10 * time.Second):
+			inst.server.Process.Signal(sig)
+		}
+	}
 	<-inst.exited
 	inst.server = nil
 	inst.exited = nil
