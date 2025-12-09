@@ -485,6 +485,23 @@ func generatePEM(path string, serverCert *x509.Certificate, serverKey *rsa.Priva
 	return nil
 }
 
+// generateCAPEM receives a CA certificate creates a PEM file in the given path.
+func generateCAPEM(path string, crt *x509.Certificate) error {
+	pemFile, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to open %q for writing: %v", path, err)
+	}
+	defer pemFile.Close()
+	err = pem.Encode(pemFile, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: crt.Raw,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to write cert to %q: %v", path, err)
+	}
+	return nil
+}
+
 // getHome for robust detection of HOME directory for use on Linux with
 // snaps.
 func getHome() (string, error) {
@@ -561,6 +578,11 @@ func (inst *mgoServer) Start(certs *Certs) error {
 		if err = generatePEM(pemPath, certs.ServerCert, certs.ServerKey); err != nil {
 			return fmt.Errorf("cannot write cert/key PEM: %v", err)
 		}
+		// Generate and save the ca.pem file.
+		caPath := filepath.Join(dbdir, "ca.pem")
+		if err = generateCAPEM(caPath, certs.CACert); err != nil {
+			return fmt.Errorf("cannot write CA cert PEM: %v", err)
+		}
 		inst.certs = certs
 	}
 
@@ -630,6 +652,7 @@ func (inst *mgoServer) run(vers version.Number) error {
 		mgoargs = append(mgoargs,
 			"--sslMode", "requireSSL",
 			"--sslPEMKeyFile", filepath.Join(inst.dir, "server.pem"),
+			"--sslCAFile", filepath.Join(inst.dir, "ca.pem"),
 			"--sslPEMKeyPassword=ignored")
 	}
 
