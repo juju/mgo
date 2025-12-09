@@ -654,7 +654,7 @@ func (inst *mgoServer) run(vers version.Number) error {
 			"--tlsCertificateKeyFile", filepath.Join(inst.dir, "server.pem"),
 			"--tlsCAFile", filepath.Join(inst.dir, "ca.pem"),
 			"--tlsAllowConnectionsWithoutCertificates",
-			"--tlsPEMKeyPassword=ignored")
+			"--tlsCertificateKeyFilePassword=ignored")
 	}
 
 	mongopath, version, err := installedMongod.Get()
