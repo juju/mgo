@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -378,6 +379,9 @@ func (inst *MgoInstance) needServer() {
 }
 
 type mgoServer struct {
+	// atomicKilled is non-zero if the mgoServer was killed
+	atomicKilled int32
+
 	// addr holds the address of the MongoDB server
 	addr string
 
@@ -538,6 +542,7 @@ func (inst *mgoServer) Start(certs *Certs) error {
 	}
 
 	logger.Debugf("starting mongo in %s", dbdir)
+	atomic.StoreInt32(&inst.atomicKilled, 0)
 
 	// Give them all the same keyfile so they can talk appropriately.
 	keyFilePath := filepath.Join(dbdir, "keyfile")
@@ -684,7 +689,10 @@ func (inst *mgoServer) run(vers version.Number) error {
 		lines := readLastLines(prefix, io.MultiReader(&buf, out), 100)
 		err = server.Wait()
 		exitErr, _ := err.(*exec.ExitError)
-		if err == nil || exitErr != nil && exitErr.Exited() {
+		if atomic.LoadInt32(&inst.atomicKilled) != 0 {
+			close(exited)
+			return
+		} else if err == nil || exitErr != nil && exitErr.Exited() {
 			// mongodb has exited without being killed, so print the
 			// last few lines of its log output.
 			logger.Errorf("mongodb has exited without being killed")
@@ -823,6 +831,7 @@ func detectMongoVersion(mongoPath string) (version.Number, error) {
 }
 
 func (inst *mgoServer) kill(sig os.Signal) {
+	atomic.AddInt32(&inst.atomicKilled, 1)
 	inst.server.Process.Signal(os.Interrupt)
 	if sig != os.Interrupt {
 		select {
