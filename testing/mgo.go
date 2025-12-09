@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,6 +61,9 @@ var (
 	storageEngineMongoVersion = mongo32
 
 	installedMongod mongodCache
+
+	// envPATH is the saved path so it cannot be overriden by the tests.
+	envPATH = os.Getenv("PATH")
 )
 
 const (
@@ -657,6 +661,15 @@ func (inst *mgoServer) run(vers version.Number) error {
 		inst.WithoutV8 = true
 	}
 	server := exec.Command(mongopath, mgoargs...)
+
+	// Use the PATH env var from when the test program started.
+	environ := os.Environ()
+	environ = slices.DeleteFunc(environ, func(e string) bool {
+		return strings.HasPrefix(e, "PATH")
+	})
+	environ = append(environ, fmt.Sprintf("PATH=%s", envPATH))
+	server.Env = environ
+
 	out, err := server.StdoutPipe()
 	if err != nil {
 		return err
@@ -772,6 +785,12 @@ func (cache *mongodCache) Get() (string, version.Number, error) {
 }
 
 func getMongod() (string, error) {
+	if oldEnvPATH := os.Getenv("PATH"); oldEnvPATH != envPATH {
+		// If PATH has changed since init, re-set it.
+		defer os.Setenv("PATH", oldEnvPATH)
+		os.Setenv("PATH", envPATH)
+	}
+
 	// Prefer $JUJU_MONGOD and then newer MongoDBs.
 	var paths []string
 	if path := os.Getenv("JUJU_MONGOD"); path != "" {
