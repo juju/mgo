@@ -650,10 +650,11 @@ func (inst *mgoServer) run(vers version.Number) error {
 	}
 	if inst.certs != nil {
 		mgoargs = append(mgoargs,
-			"--sslMode", "requireSSL",
-			"--sslPEMKeyFile", filepath.Join(inst.dir, "server.pem"),
-			"--sslCAFile", filepath.Join(inst.dir, "ca.pem"),
-			"--sslPEMKeyPassword=ignored")
+			"--tlsMode", "requireTLS",
+			"--tlsPEMKeyFile", filepath.Join(inst.dir, "server.pem"),
+			"--tlsCAFile", filepath.Join(inst.dir, "ca.pem"),
+			"--tlsAllowConnectionsWithoutCertificates",
+			"--tlsPEMKeyPassword=ignored")
 	}
 
 	mongopath, version, err := installedMongod.Get()
