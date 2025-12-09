@@ -651,7 +651,7 @@ func (inst *mgoServer) run(vers version.Number) error {
 	if inst.certs != nil {
 		mgoargs = append(mgoargs,
 			"--tlsMode", "requireTLS",
-			"--tlsPEMKeyFile", filepath.Join(inst.dir, "server.pem"),
+			"--tlsCertificateKeyFile", filepath.Join(inst.dir, "server.pem"),
 			"--tlsCAFile", filepath.Join(inst.dir, "ca.pem"),
 			"--tlsAllowConnectionsWithoutCertificates",
 			"--tlsPEMKeyPassword=ignored")
