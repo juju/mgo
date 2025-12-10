@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +63,9 @@ var (
 
 	// envPATH is the saved path so it cannot be overriden by the tests.
 	envPATH = os.Getenv("PATH")
+
+	// env is the saved environ so it cannot be overriden by the tests.
+	env = os.Environ()
 )
 
 const (
@@ -685,14 +687,8 @@ func (inst *mgoServer) run(vers version.Number) error {
 		inst.WithoutV8 = true
 	}
 	server := exec.Command(mongopath, mgoargs...)
-
-	// Use the PATH env var from when the test program started.
-	environ := os.Environ()
-	environ = slices.DeleteFunc(environ, func(e string) bool {
-		return strings.HasPrefix(e, "PATH")
-	})
-	environ = append(environ, fmt.Sprintf("PATH=%s", envPATH))
-	server.Env = environ
+	// Use the environ from when the test program started.
+	server.Env = env
 
 	out, err := server.StdoutPipe()
 	if err != nil {
