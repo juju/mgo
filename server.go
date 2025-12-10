@@ -157,6 +157,7 @@ func (server *mongoServer) Connect(timeout time.Duration) (*mongoSocket, error) 
 	logf("Establishing new connection to %s (timeout=%s)...", server.Addr, timeout)
 	var conn net.Conn
 	var err error
+	var sp int
 	switch {
 	case !dial.isSet():
 		// Cannot do this because it lacks timeout support. :-(
@@ -167,10 +168,13 @@ func (server *mongoServer) Connect(timeout time.Duration) (*mongoSocket, error) 
 		} else if err == nil {
 			panic("internal error: obtained TCP connection is not a *net.TCPConn!?")
 		}
+		sp = statsPort(server.ResolvedAddr)
 	case dial.old != nil:
 		conn, err = dial.old(server.tcpaddr)
+		sp = server.tcpaddr.Port
 	case dial.new != nil:
 		conn, err = dial.new(&ServerAddr{server.Addr, server.tcpaddr})
+		sp = server.tcpaddr.Port
 	default:
 		panic("dialer is set, but both dial.old and dial.new are nil")
 	}
@@ -180,7 +184,7 @@ func (server *mongoServer) Connect(timeout time.Duration) (*mongoSocket, error) 
 	}
 	logf("Connection to %s established.", server.Addr)
 
-	stats.conn(+1, master)
+	stats.conn(+1, master, sp)
 	return newSocket(server, conn, timeout), nil
 }
 

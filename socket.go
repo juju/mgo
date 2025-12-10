@@ -54,6 +54,8 @@ type mongoSocket struct {
 	gotNonce      sync.Cond
 	dead          error
 	serverInfo    *mongoServerInfo
+	statsPort     int
+	statAlive     int
 }
 
 type queryOpFlags uint32
@@ -184,12 +186,14 @@ func newSocket(server *mongoServer, conn net.Conn, timeout time.Duration) *mongo
 		addr:       server.Addr,
 		server:     server,
 		replyFuncs: make(map[uint32]replyFunc),
+		statsPort:  statsPort(server.Addr),
 	}
 	socket.gotNonce.L = &socket.Mutex
 	if err := socket.InitialAcquire(server.Info(), timeout); err != nil {
 		panic("newSocket: InitialAcquire returned error: " + err.Error())
 	}
-	stats.socketsAlive(+1)
+	socket.statAlive++
+	stats.socketsAlive(+1, socket.statsPort)
 	debugf("Socket %p to %s: initialized", socket, socket.addr)
 	socket.resetNonce()
 	go socket.readLoop()
@@ -230,8 +234,8 @@ func (socket *mongoSocket) InitialAcquire(serverInfo *mongoServerInfo, timeout t
 	socket.references++
 	socket.serverInfo = serverInfo
 	socket.timeout = timeout
-	stats.socketsInUse(+1)
-	stats.socketRefs(+1)
+	stats.socketsInUse(+1, socket.statsPort)
+	stats.socketRefs(+1, socket.statsPort)
 	socket.Unlock()
 	return nil
 }
@@ -247,7 +251,7 @@ func (socket *mongoSocket) Acquire() (info *mongoServerInfo) {
 	// We'll track references to dead sockets as well.
 	// Caller is still supposed to release the socket.
 	socket.references++
-	stats.socketRefs(+1)
+	stats.socketRefs(+1, socket.statsPort)
 	serverInfo := socket.serverInfo
 	socket.Unlock()
 	return serverInfo
@@ -261,9 +265,9 @@ func (socket *mongoSocket) Release() {
 		panic("socket.Release() with references == 0")
 	}
 	socket.references--
-	stats.socketRefs(-1)
+	stats.socketRefs(-1, socket.statsPort)
 	if socket.references == 0 {
-		stats.socketsInUse(-1)
+		stats.socketsInUse(-1, socket.statsPort)
 		server := socket.server
 		socket.Unlock()
 		socket.LogoutAll()
@@ -327,7 +331,8 @@ func (socket *mongoSocket) kill(err error, abend bool) {
 	logf("Socket %p to %s: closing: %s (abend=%v)", socket, socket.addr, err.Error(), abend)
 	socket.dead = err
 	socket.conn.Close()
-	stats.socketsAlive(-1)
+	stats.socketsAlive(-socket.statAlive, socket.statsPort)
+	socket.statAlive = 0
 	replyFuncs := socket.replyFuncs
 	socket.replyFuncs = make(map[uint32]replyFunc)
 	server := socket.server
@@ -520,7 +525,7 @@ func (socket *mongoSocket) Query(ops ...interface{}) (err error) {
 	}
 
 	debugf("Socket %p to %s: sending %d op(s) (%d bytes)", socket, socket.addr, len(ops), len(buf))
-	stats.sentOps(len(ops))
+	stats.sentOps(len(ops), socket.statsPort)
 
 	socket.updateDeadline(writeDeadline)
 	_, err = socket.conn.Write(buf)
@@ -589,8 +594,8 @@ func (socket *mongoSocket) readLoop() {
 			replyDocs: getInt32(p, 32),
 		}
 
-		stats.receivedOps(+1)
-		stats.receivedDocs(int(reply.replyDocs))
+		stats.receivedOps(+1, socket.statsPort)
+		stats.receivedDocs(int(reply.replyDocs), socket.statsPort)
 
 		socket.Lock()
 		replyFunc, ok := socket.replyFuncs[uint32(responseTo)]
