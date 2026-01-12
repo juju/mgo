@@ -157,8 +157,8 @@ type MgoSuite struct {
 	SkipTestCleanup bool
 }
 
-// generatePEM receives server certificate and the server private key
-// and creates a PEM file in the given path.
+// generatePEM receives server certificate and optionally the
+// server private key and creates a PEM file in the given path.
 func generatePEM(path string, serverCert *x509.Certificate, serverKey *rsa.PrivateKey) error {
 	pemFile, err := os.Create(path)
 	if err != nil {
@@ -171,6 +171,9 @@ func generatePEM(path string, serverCert *x509.Certificate, serverKey *rsa.Priva
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write cert to %q: %v", path, err)
+	}
+	if serverKey == nil {
+		return nil
 	}
 	err = pem.Encode(pemFile, &pem.Block{
 		Type:  "RSA PRIVATE KEY",
@@ -257,6 +260,10 @@ func (inst *MgoInstance) Start(certs *Certs) error {
 		if err = generatePEM(pemPath, certs.ServerCert, certs.ServerKey); err != nil {
 			return fmt.Errorf("cannot write cert/key PEM: %v", err)
 		}
+		caPath := filepath.Join(dbdir, "ca.crt")
+		if err = generatePEM(caPath, certs.CACert, nil); err != nil {
+			return fmt.Errorf("cannot write ca cert PEM: %v", err)
+		}
 		inst.certs = certs
 	}
 
@@ -323,9 +330,11 @@ func (inst *MgoInstance) run(vers version.Number) error {
 	}
 	if inst.certs != nil {
 		mgoargs = append(mgoargs,
-			"--sslMode", "requireSSL",
-			"--sslPEMKeyFile", filepath.Join(inst.dir, "server.pem"),
-			"--sslPEMKeyPassword=ignored")
+			"--tlsMode", "requireTLS",
+			"--tlsCertificateKeyFile", filepath.Join(inst.dir, "server.pem"),
+			"--tlsCAFile", filepath.Join(inst.dir, "ca.crt"),
+			"--tlsCertificateKeyFilePassword=ignored",
+			"--tlsAllowInvalidHostnames")
 	}
 
 	mongopath, version, err := installedMongod.Get()
@@ -712,9 +721,15 @@ func MgoDialInfo(certs *Certs, addrs ...string) *mgo.DialInfo {
 	if certs != nil {
 		pool := x509.NewCertPool()
 		pool.AddCert(certs.CACert)
+		// For testing, we'll just use the server cert.
+		clientCert := tls.Certificate{
+			Certificate: [][]byte{certs.ServerCert.Raw},
+			PrivateKey:  certs.ServerKey,
+		}
 		tlsConfig := &tls.Config{
 			RootCAs:    pool,
 			ServerName: "anything",
+			Certificates: []tls.Certificate{clientCert},
 		}
 		dial = func(addr net.Addr) (net.Conn, error) {
 			conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
