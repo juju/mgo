@@ -187,11 +187,29 @@ func generatePEM(path string, serverCert *x509.Certificate, serverKey *rsa.Priva
 
 // getHome for robust detection of HOME directory for use on Linux with
 // snaps.
+//
+// Use `getent passwd` to find the home directory of the user
+// falling back to reading /etc/passwd if the command fails.
+// In some environments /etc/passwd may not be available or
+// is not the source of truth (e.g., LDAP, NSS).
+// And don't use os/user package as it requires CGO on Linux.
 func getHome() (string, error) {
 	targetUID := strconv.Itoa(os.Getuid())
-	passwd, err := ioutil.ReadFile("/etc/passwd")
-	if err != nil {
-		return "", errors.Trace(err)
+	var passwd []byte
+	var err error
+
+	cmd := exec.Command("getent", "passwd", targetUID)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if runErr := cmd.Run(); runErr == nil {
+		passwd = out.Bytes()
+	} else {
+		// Fallback to reading /etc/passwd directly.
+		passwd, err = os.ReadFile("/etc/passwd")
+		if err != nil {
+			return "", errors.Trace(err)
+		}
 	}
 	lines := strings.Split(string(passwd), "\n")
 	for _, line := range lines {
