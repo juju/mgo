@@ -335,7 +335,7 @@ func (inst *MgoInstance) run(vers version.Number) error {
 			"--tlsCertificateKeyFile", filepath.Join(inst.dir, "server.pem"),
 			"--tlsCAFile", filepath.Join(inst.dir, "ca.crt"),
 			"--tlsCertificateKeyFilePassword=ignored",
-			"--tlsAllowInvalidHostnames=true")
+			"--tlsAllowInvalidHostnames")
 	}
 
 	mongopath, version, err := installedMongod.Get()
