@@ -221,7 +221,7 @@ type Runner struct {
 	opts RunnerOptions   // runtime options
 }
 
-const defaultMaxTxnQueueLength = 1000
+const defaultMaxTxnQueueLength = 100000
 const defaultAssertionCleanupLength = 10
 
 // NewRunner returns a new transaction runner that uses tc to hold its
