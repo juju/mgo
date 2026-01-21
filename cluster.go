@@ -194,7 +194,7 @@ func (cluster *mongoCluster) syncServer(server *mongoServer) (info *mongoServerI
 			continue
 		}
 		err = cluster.isMaster(socket, &result)
-		socket.Release()
+		socket.Release(0)
 		if err != nil {
 			tryerr = err
 			logf("SYNC Command 'ismaster' to %s failed: %v", addr, err)
@@ -583,7 +583,7 @@ func (cluster *mongoCluster) syncServersIteration(direct bool) {
 // AcquireSocket returns a socket to a server in the cluster.  If slaveOk is
 // true, it will attempt to return a socket to a slave server.  If it is
 // false, the socket will necessarily be to a master server.
-func (cluster *mongoCluster) AcquireSocket(mode Mode, slaveOk bool, syncTimeout time.Duration, socketTimeout time.Duration, serverTags []bson.D, poolLimit int) (s *mongoSocket, err error) {
+func (cluster *mongoCluster) AcquireSocket(mode Mode, slaveOk bool, syncTimeout time.Duration, socketTimeout time.Duration, serverTags []bson.D, poolLimit, poolUnusedLimit int) (s *mongoSocket, err error) {
 	var started time.Time
 	var syncCount uint
 	warnedLimit := false
@@ -647,7 +647,7 @@ func (cluster *mongoCluster) AcquireSocket(mode Mode, slaveOk bool, syncTimeout 
 			err := cluster.isMaster(s, &result)
 			if err != nil || !result.IsMaster {
 				logf("Cannot confirm server %s as master (%v)", server.Addr, err)
-				s.Release()
+				s.Release(poolUnusedLimit)
 				cluster.syncServers()
 				time.Sleep(100 * time.Millisecond)
 				continue
