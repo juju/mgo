@@ -189,24 +189,50 @@ func generatePEM(path string, serverCert *x509.Certificate, serverKey *rsa.Priva
 // snaps.
 func getHome() (string, error) {
 	targetUID := strconv.Itoa(os.Getuid())
-	passwd, err := ioutil.ReadFile("/etc/passwd")
+	if home, err := homeFromPasswdFile("/etc/passwd", targetUID); err == nil {
+		return home, nil
+	} else if !errors.Is(err, errors.NotFound) {
+		return "", errors.Trace(err)
+	}
+	// User not found in /etc/passwd (e.g. LDAP auth); fall back to getent.
+	return homeFromGetent(targetUID)
+}
+
+// homeFromPasswdFile searches a passwd-formatted file for targetUID and
+// returns the home directory field.
+func homeFromPasswdFile(path, targetUID string) (string, error) {
+	passwd, err := os.ReadFile(path)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
-	lines := strings.Split(string(passwd), "\n")
+	return homeFromPasswdLines(strings.Split(string(passwd), "\n"), targetUID)
+}
+
+// homeFromGetent runs "getent passwd <uid>" and parses the home directory
+// from the output. This covers users sourced from LDAP or other NSS backends.
+func homeFromGetent(targetUID string) (string, error) {
+	out, err := exec.Command("getent", "passwd", targetUID).Output()
+	if err != nil {
+		return "", errors.Annotatef(err, "getent passwd %s failed", targetUID)
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	return homeFromPasswdLines(lines, targetUID)
+}
+
+// homeFromPasswdLines searches passwd-formatted lines for targetUID and
+// returns the home directory field.
+func homeFromPasswdLines(lines []string, targetUID string) (string, error) {
 	for _, line := range lines {
 		passwdEntry := strings.Split(line, ":")
 		if len(passwdEntry) != 7 {
 			// Invalid passwd entry.
 			continue
 		}
-		uidEntry := passwdEntry[2]
-		if uidEntry != targetUID {
+		if passwdEntry[2] != targetUID {
 			// Not the user we are looking for.
 			continue
 		}
-		home := passwdEntry[5]
-		return home, nil
+		return passwdEntry[5], nil
 	}
 	return "", errors.NotFoundf("UNIX user %s", targetUID)
 }
@@ -228,7 +254,7 @@ func (inst *MgoInstance) Start(certs *Certs) error {
 			return errors.Annotatef(err, "failed to find HOME directory")
 		}
 		base := path.Join(home, "snap/juju-db/current/tmp")
-		err = os.Mkdir(base, 0755)
+		err = os.Mkdir(base, 0o755)
 		if os.IsExist(err) {
 			// do nothing
 		} else if err != nil {
@@ -249,7 +275,7 @@ func (inst *MgoInstance) Start(certs *Certs) error {
 
 	// Give them all the same keyfile so they can talk appropriately.
 	keyFilePath := filepath.Join(dbdir, "keyfile")
-	err = ioutil.WriteFile(keyFilePath, []byte("not very secret"), 0600)
+	err = ioutil.WriteFile(keyFilePath, []byte("not very secret"), 0o600)
 	if err != nil {
 		return fmt.Errorf("cannot write key file: %v", err)
 	}
@@ -728,8 +754,8 @@ func MgoDialInfo(certs *Certs, addrs ...string) *mgo.DialInfo {
 			PrivateKey:  certs.ServerKey,
 		}
 		tlsConfig := &tls.Config{
-			RootCAs:    pool,
-			ServerName: "anything",
+			RootCAs:      pool,
+			ServerName:   "anything",
 			Certificates: []tls.Certificate{clientCert},
 		}
 		dial = func(addr net.Addr) (net.Conn, error) {
