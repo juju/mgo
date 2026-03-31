@@ -2,11 +2,11 @@
 //
 // For details check the following blog post:
 //
-//     http://blog.labix.org/2012/08/22/multi-doc-transactions-for-mongodb
-//
+//	http://blog.labix.org/2012/08/22/multi-doc-transactions-for-mongodb
 package txn
 
 import (
+	"context"
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -301,7 +301,7 @@ var ErrAborted = fmt.Errorf("transaction aborted")
 //
 // Any number of transactions may be run concurrently, with one
 // runner or many.
-func (r *Runner) Run(ops []Op, id bson.ObjectId, info interface{}) (err error) {
+func (r *Runner) Run(ctx context.Context, ops []Op, id bson.ObjectId, info interface{}) (err error) {
 	const efmt = "error in transaction op %d: %s"
 	for i := range ops {
 		op := &ops[i]
@@ -399,7 +399,7 @@ func (r *Runner) Resume(id bson.ObjectId) (err error) {
 //
 // Saved documents are in the format:
 //
-//     {"_id": <txn id>, <collection>: {"d": [<doc id>, ...], "r": [<doc revno>, ...]}}
+//	{"_id": <txn id>, <collection>: {"d": [<doc id>, ...], "r": [<doc revno>, ...]}}
 //
 // The document revision is the value of the txn-revno field after
 // the change has been applied. Negative values indicate the document
